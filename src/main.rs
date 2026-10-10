@@ -1,6 +1,7 @@
 mod appimage;
 mod cli;
 mod desktop;
+mod download;
 mod install;
 mod paths;
 mod state;

@@ -6,7 +6,7 @@ use std::process::{self, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::appimage::{self, AppImageType};
-use crate::desktop;
+use crate::{desktop, download};
 use crate::paths::Paths;
 use crate::state::{InstalledApp, InstalledState};
 
@@ -26,29 +26,59 @@ pub fn install_from_file(paths: &Paths, source: &Path) -> Result<InstalledApp, S
     let source = source
         .canonicalize()
         .map_err(|e| format!("could not find {}: {e}", source.display()))?;
-    if let AppImageType::One = appimage::detect(&source)? {
-        return Err("this is an old-style (type 1) AppImage, which Outpost doesn't support".into());
-    }
+    let source_label = source.display().to_string();
+    install_with(paths, &source_label, |incoming| {
+        fs::copy(&source, incoming)
+            .map(|_| ())
+            .map_err(|e| format!("could not copy the AppImage: {e}"))
+    })
+}
 
+/// `progress(downloaded, total)` is called as the download comes in.
+pub fn install_from_url(
+    paths: &Paths,
+    url: &str,
+    progress: impl FnMut(u64, Option<u64>),
+) -> Result<InstalledApp, String> {
+    install_with(paths, url, |incoming| download::download(url, incoming, progress))
+}
+
+/// Shared install steps. `fetch` puts the AppImage at the path it's given.
+fn install_with(
+    paths: &Paths,
+    source: &str,
+    fetch: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<InstalledApp, String> {
     for dir in [&paths.applications, &paths.desktop_entries, &paths.data, &paths.cache] {
         fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
 
-    // Copy in under a temporary name first, so a failed install never leaves a
-    // half-finished app behind.
+    // Bring the file in under a temporary name first, so a failed install never
+    // leaves a half-finished app behind.
     let incoming = paths
         .applications
         .join(format!(".outpost-incoming-{}.AppImage", process::id()));
-    fs::copy(&source, &incoming).map_err(|e| format!("could not copy the AppImage: {e}"))?;
-
-    let result = make_executable(&incoming).and_then(|()| install_incoming(paths, &incoming, &source));
+    let result = fetch(&incoming)
+        .and_then(|()| check_appimage(&incoming, source))
+        .and_then(|()| make_executable(&incoming))
+        .and_then(|()| install_incoming(paths, &incoming, source));
     if result.is_err() {
         let _ = fs::remove_file(&incoming);
     }
     result
 }
 
-fn install_incoming(paths: &Paths, incoming: &Path, source: &Path) -> Result<InstalledApp, String> {
+fn check_appimage(path: &Path, source: &str) -> Result<(), String> {
+    match appimage::detect(path) {
+        Ok(AppImageType::Two) => Ok(()),
+        Ok(AppImageType::One) => Err(format!(
+            "{source} is an old-style (type 1) AppImage, which Outpost doesn't support"
+        )),
+        Err(e) => Err(format!("{source} {e}")),
+    }
+}
+
+fn install_incoming(paths: &Paths, incoming: &Path, source: &str) -> Result<InstalledApp, String> {
     let meta = read_metadata(paths, incoming)?;
     let id = sanitize_id(&meta.desktop_stem);
     let name = desktop::get(&meta.desktop, "Name").unwrap_or_else(|| id.clone());
@@ -91,7 +121,7 @@ fn install_incoming(paths: &Paths, incoming: &Path, source: &Path) -> Result<Ins
         desktop_path,
         icon_path,
         installed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
-        source: source.display().to_string(),
+        source: source.to_string(),
     };
     state.apps.push(app.clone());
     state.save(&paths.installed_json())?;
