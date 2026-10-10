@@ -322,7 +322,7 @@ fn sanitize_id(stem: &str) -> String {
 }
 
 /// Nudges the launcher to pick up added or removed apps. Failures don't matter.
-fn refresh_launcher(paths: &Paths) {
+pub fn refresh_launcher(paths: &Paths) {
     // GNOME notices new desktop files on its own; this refreshes the MIME-type cache.
     let _ = Command::new("update-desktop-database")
         .arg(&paths.desktop_entries)

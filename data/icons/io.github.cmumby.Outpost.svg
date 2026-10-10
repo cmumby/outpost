@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Outpost: a frontier lookout tower flying a flag with a download arrow. -->
+  <!-- legs -->
+  <path d="M41 66 L28 122 L38 122 L50 66 Z" fill="#63452c"/>
+  <path d="M87 66 L100 122 L90 122 L78 66 Z" fill="#63452c"/>
+  <!-- cross braces -->
+  <path d="M44 80 L86 112 L83 116 L41 84 Z" fill="#865e3c"/>
+  <path d="M84 80 L42 112 L45 116 L87 84 Z" fill="#865e3c"/>
+  <!-- platform, with a darker base for depth -->
+  <rect x="28" y="62" width="72" height="13" rx="3" fill="#63452c"/>
+  <rect x="28" y="60" width="72" height="10" rx="3" fill="#986a44"/>
+  <!-- cabin -->
+  <rect x="37" y="40" width="54" height="21" fill="#b5835a"/>
+  <rect x="46" y="45" width="36" height="11" rx="2" fill="#3d3846"/>
+  <!-- roof -->
+  <path d="M28 44 L64 23 L100 44 Z" fill="#a51d2d"/>
+  <path d="M28 42 L64 21 L100 42 L100 44 L64 25 L28 44 Z" fill="#e01b24"/>
+  <!-- flag -->
+  <rect x="62" y="2" width="4" height="22" fill="#5e5c64"/>
+  <path d="M66 2 L104 2 L96 11.5 L104 21 L66 21 Z" fill="#1a5fb4"/>
+  <path d="M66 2 L104 2 L96 11.5 L104 21 L66 21 Z" fill="#3584e4" transform="translate(0 -1.5)"/>
+  <path d="M79 3.5 L85 3.5 L85 9.5 L90 9.5 L82 17.5 L74 9.5 L79 9.5 Z" fill="#ffffff"/>
+</svg>

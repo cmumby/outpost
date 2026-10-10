@@ -161,6 +161,9 @@ pub fn build_window(application: &adw::Application) {
         }
     };
 
+    register_desktop_entry(&paths);
+    gtk::Window::set_default_icon_name(crate::APP_ID);
+
     let window = adw::ApplicationWindow::builder()
         .application(application)
         .title("Outpost")
@@ -186,7 +189,6 @@ pub fn build_window(application: &adw::Application) {
         announced_updates: RefCell::default(),
     });
 
-    register_desktop_entry(&store.paths);
     nav.add(&main_page(&store));
     store.reload_installed();
     window.present();
@@ -394,9 +396,28 @@ fn libfuse2_banner(store: &Rc<Store>) -> adw::Banner {
     banner
 }
 
-/// Adds Outpost itself to the launcher. GNOME only shows an app's notifications if
-/// it has a launcher entry, and this also makes Outpost easy to find again.
+/// Outpost's own icons, built into the program so it never depends on the theme.
+const ICON: &[u8] = include_bytes!("../../data/icons/io.github.cmumby.Outpost.svg");
+const SYMBOLIC_ICON: &[u8] = include_bytes!("../../data/icons/io.github.cmumby.Outpost-symbolic.svg");
+
+/// Adds Outpost itself to the launcher, with its icon. GNOME only shows an app's
+/// notifications if it has a launcher entry, and this also makes Outpost easy to
+/// find again.
 fn register_desktop_entry(paths: &Paths) {
+    let icons = [
+        (paths.icons.join(format!("scalable/apps/{}.svg", crate::APP_ID)), ICON),
+        (paths.icons.join(format!("symbolic/apps/{}-symbolic.svg", crate::APP_ID)), SYMBOLIC_ICON),
+    ];
+    let mut changed = false;
+    for (path, bytes) in icons {
+        if fs::read(&path).ok().as_deref() != Some(bytes) {
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            changed |= fs::write(&path, bytes).is_ok();
+        }
+    }
+
     // Inside an AppImage, the running file is a temporary mount; $APPIMAGE is the real one.
     let Some(program) = std::env::var_os("APPIMAGE")
         .map(std::path::PathBuf::from)
@@ -410,14 +431,18 @@ fn register_desktop_entry(paths: &Paths) {
          Name=Outpost\n\
          Comment=Find, install and update AppImages\n\
          Exec=\"{}\"\n\
-         Icon=system-software-install\n\
+         Icon={}\n\
          Categories=System;PackageManager;\n\
          StartupNotify=true\n",
-        program.display()
+        program.display(),
+        crate::APP_ID
     );
     let path = paths.desktop_entries.join(format!("{}.desktop", crate::APP_ID));
     if fs::read_to_string(&path).ok().as_deref() != Some(entry.as_str()) {
         let _ = fs::create_dir_all(&paths.desktop_entries);
-        let _ = fs::write(&path, entry);
+        changed |= fs::write(&path, entry).is_ok();
+    }
+    if changed {
+        install::refresh_launcher(paths);
     }
 }

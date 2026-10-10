@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- One-color Outpost tower for small panels; GNOME recolors it to match the theme. -->
+  <g fill="#241f31">
+    <path d="M7.5 0.5 h1 v1 h4 l-1 1 l1 1 h-5 v-0.5 Z"/>
+    <path d="M2 7 L8 3.5 L14 7 Z"/>
+    <path fill-rule="evenodd" d="M3.5 7 h9 v3 h-9 Z M5 8 h6 v1 h-6 Z"/>
+    <rect x="2" y="10" width="12" height="1.5" rx="0.5"/>
+    <path d="M4 11.5 h1.6 l-1 4 h-1.6 Z"/>
+    <path d="M10.4 11.5 h1.6 l1 4 h-1.6 Z"/>
+  </g>
+</svg>
