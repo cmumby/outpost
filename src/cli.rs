@@ -22,7 +22,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         ["install", source] => {
             let app = if source.starts_with("https://") || source.starts_with("http://") {
                 let mut progress = Progress::default();
-                let result = install::install_from_url(&paths, source, |done, total| progress.show(done, total));
+                let result = install::install_from_url(&paths, source, None, |done, total| progress.show(done, total));
                 progress.finish();
                 result?
             } else {

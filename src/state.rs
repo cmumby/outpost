@@ -19,6 +19,9 @@ pub struct InstalledApp {
     pub installed_at: u64,
     /// Where it was installed from (a local file path for now; later a URL or index entry).
     pub source: String,
+    /// The app's id in the store's index, when it was installed from the store.
+    #[serde(default)]
+    pub index_id: Option<String>,
 }
 
 /// The contents of `~/.local/share/outpost/installed.json`.

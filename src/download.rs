@@ -2,20 +2,30 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
+
+use reqwest::blocking::Client;
+
+/// One HTTP client for the whole app, so connections get reused.
+pub fn client() -> &'static Client {
+    static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        Client::builder()
+            .user_agent(concat!("Outpost/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(30))
+            // The default 30-second limit covers the whole download, which is far
+            // too short for a large AppImage. Small requests set their own.
+            .timeout(None)
+            .build()
+            .expect("HTTP client settings are valid")
+    });
+    &CLIENT
+}
 
 /// Downloads `url` into `dest`, calling `progress(downloaded, total)` as bytes arrive.
 /// `total` is `None` when the server doesn't say how big the file is.
 pub fn download(url: &str, dest: &Path, mut progress: impl FnMut(u64, Option<u64>)) -> Result<(), String> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(concat!("Outpost/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(30))
-        // The default 30-second limit covers the whole download, which is far too
-        // short for a large AppImage.
-        .timeout(None)
-        .build()
-        .map_err(|e| describe(&e))?;
-    let mut response = client
+    let mut response = client()
         .get(url)
         .send()
         .and_then(|response| response.error_for_status())
@@ -42,7 +52,7 @@ pub fn download(url: &str, dest: &Path, mut progress: impl FnMut(u64, Option<u64
 
 /// reqwest's own messages are vague ("error sending request"); the useful detail,
 /// like "dns error" or "connection refused", is in the chain of causes.
-fn describe(error: &dyn Error) -> String {
+pub fn describe(error: &dyn Error) -> String {
     let mut message = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {

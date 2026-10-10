@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use directories::BaseDirs;
 
 /// Where Outpost puts things. Everything lives under the user's home directory.
+#[derive(Clone)]
 pub struct Paths {
     /// `~/Applications` — the AppImages themselves.
     pub applications: PathBuf,

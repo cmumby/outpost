@@ -3,6 +3,8 @@ use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::appimage::{self, AppImageType};
@@ -27,26 +29,34 @@ pub fn install_from_file(paths: &Paths, source: &Path) -> Result<InstalledApp, S
         .canonicalize()
         .map_err(|e| format!("could not find {}: {e}", source.display()))?;
     let source_label = source.display().to_string();
-    install_with(paths, &source_label, |incoming| {
+    install_with(paths, &source_label, None, |incoming| {
         fs::copy(&source, incoming)
             .map(|_| ())
             .map_err(|e| format!("could not copy the AppImage: {e}"))
     })
 }
 
+/// The store's listing for an app being installed from the index.
+pub struct StoreEntry<'a> {
+    pub id: &'a str,
+    pub version: &'a str,
+}
+
 /// `progress(downloaded, total)` is called as the download comes in.
 pub fn install_from_url(
     paths: &Paths,
     url: &str,
+    entry: Option<StoreEntry>,
     progress: impl FnMut(u64, Option<u64>),
 ) -> Result<InstalledApp, String> {
-    install_with(paths, url, |incoming| download::download(url, incoming, progress))
+    install_with(paths, url, entry, |incoming| download::download(url, incoming, progress))
 }
 
 /// Shared install steps. `fetch` puts the AppImage at the path it's given.
 fn install_with(
     paths: &Paths,
     source: &str,
+    entry: Option<StoreEntry>,
     fetch: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<InstalledApp, String> {
     for dir in [&paths.applications, &paths.desktop_entries, &paths.data, &paths.cache] {
@@ -57,11 +67,11 @@ fn install_with(
     // leaves a half-finished app behind.
     let incoming = paths
         .applications
-        .join(format!(".outpost-incoming-{}.AppImage", process::id()));
+        .join(format!(".outpost-incoming-{}.AppImage", unique_suffix()));
     let result = fetch(&incoming)
         .and_then(|()| check_appimage(&incoming, source))
         .and_then(|()| make_executable(&incoming))
-        .and_then(|()| install_incoming(paths, &incoming, source));
+        .and_then(|()| install_incoming(paths, &incoming, source, entry));
     if result.is_err() {
         let _ = fs::remove_file(&incoming);
     }
@@ -78,14 +88,24 @@ fn check_appimage(path: &Path, source: &str) -> Result<(), String> {
     }
 }
 
-fn install_incoming(paths: &Paths, incoming: &Path, source: &str) -> Result<InstalledApp, String> {
+fn install_incoming(
+    paths: &Paths,
+    incoming: &Path,
+    source: &str,
+    entry: Option<StoreEntry>,
+) -> Result<InstalledApp, String> {
     let meta = read_metadata(paths, incoming)?;
     let id = sanitize_id(&meta.desktop_stem);
     let name = desktop::get(&meta.desktop, "Name").unwrap_or_else(|| id.clone());
-    let version = desktop::get(&meta.desktop, "X-AppImage-Version");
+    // Many AppImages don't record their version, so trust the store's when we have it.
+    let version = match &entry {
+        Some(entry) => Some(entry.version.to_string()),
+        None => desktop::get(&meta.desktop, "X-AppImage-Version"),
+    };
     let appimage_path = paths.applications.join(format!("{id}.AppImage"));
 
     // Installing an app that's already installed replaces it.
+    let _lock = lock_state();
     let mut state = InstalledState::load(&paths.installed_json())?;
     if let Some(old) = state.find(&id) {
         remove_files(old)?;
@@ -108,8 +128,8 @@ fn install_incoming(paths: &Paths, incoming: &Path, source: &str) -> Result<Inst
     };
 
     let desktop_path = paths.desktop_entries.join(format!("outpost-{id}.desktop"));
-    let entry = desktop::rewrite(&meta.desktop, &appimage_path, &icon_value, &id, &meta.desktop_stem);
-    fs::write(&desktop_path, entry)
+    let launcher_entry = desktop::rewrite(&meta.desktop, &appimage_path, &icon_value, &id, &meta.desktop_stem);
+    fs::write(&desktop_path, launcher_entry)
         .map_err(|e| format!("could not write {}: {e}", desktop_path.display()))?;
     refresh_launcher(paths);
 
@@ -122,6 +142,7 @@ fn install_incoming(paths: &Paths, incoming: &Path, source: &str) -> Result<Inst
         icon_path,
         installed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         source: source.to_string(),
+        index_id: entry.map(|entry| entry.id.to_string()),
     };
     state.apps.push(app.clone());
     state.save(&paths.installed_json())?;
@@ -129,6 +150,7 @@ fn install_incoming(paths: &Paths, incoming: &Path, source: &str) -> Result<Inst
 }
 
 pub fn uninstall(paths: &Paths, id: &str) -> Result<InstalledApp, String> {
+    let _lock = lock_state();
     let mut state = InstalledState::load(&paths.installed_json())?;
     let index = state
         .apps
@@ -149,7 +171,7 @@ pub fn list(paths: &Paths) -> Result<Vec<InstalledApp>, String> {
 
 /// Pulls just the desktop file and icon out of the AppImage into a scratch folder.
 fn read_metadata(paths: &Paths, appimage: &Path) -> Result<Metadata, String> {
-    let work = paths.cache.join(format!("extract-{}", process::id()));
+    let work = paths.cache.join(format!("extract-{}", unique_suffix()));
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(|e| format!("could not create {}: {e}", work.display()))?;
     let _cleanup = RemoveDirOnDrop(work.clone());
@@ -298,6 +320,21 @@ fn refresh_launcher(paths: &Paths) {
     // GTK only re-scans an icon theme when the theme folder's own timestamp changes,
     // and icons go in subfolders that don't bump it, so bump it ourselves.
     let _ = fs::File::open(&paths.icons).and_then(|dir| dir.set_modified(SystemTime::now()));
+}
+
+/// Installs can run at the same time (the store runs each on its own thread), so
+/// changes to installed.json take turns, and scratch files get unique names.
+static STATE_LOCK: Mutex<()> = Mutex::new(());
+static NEXT_SUFFIX: AtomicU64 = AtomicU64::new(0);
+
+fn lock_state() -> MutexGuard<'static, ()> {
+    // A panic mid-install doesn't leave the file half-written (saves are atomic),
+    // so it's safe to carry on after one.
+    STATE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn unique_suffix() -> String {
+    format!("{}-{}", process::id(), NEXT_SUFFIX.fetch_add(1, Ordering::Relaxed))
 }
 
 struct RemoveDirOnDrop(PathBuf);
