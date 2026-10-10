@@ -40,6 +40,8 @@ pub fn install_from_file(paths: &Paths, source: &Path) -> Result<InstalledApp, S
 pub struct StoreEntry<'a> {
     pub id: &'a str,
     pub version: &'a str,
+    /// The checksum the download must match, when the index has one.
+    pub sha256: Option<&'a str>,
 }
 
 /// `progress(downloaded, total)` is called as the download comes in.
@@ -49,7 +51,18 @@ pub fn install_from_url(
     entry: Option<StoreEntry>,
     progress: impl FnMut(u64, Option<u64>),
 ) -> Result<InstalledApp, String> {
-    install_with(paths, url, entry, |incoming| download::download(url, incoming, progress))
+    let expected = entry.as_ref().and_then(|entry| entry.sha256).map(str::to_lowercase);
+    install_with(paths, url, entry, |incoming| {
+        let actual = download::download(url, incoming, progress)?;
+        match expected {
+            Some(expected) if expected != actual => Err(
+                "the download doesn't match the checksum in the catalogue, so it wasn't installed. \
+                 It may be damaged or have been tampered with; try again later"
+                    .into(),
+            ),
+            _ => Ok(()),
+        }
+    })
 }
 
 /// Shared install steps. `fetch` puts the AppImage at the path it's given.
@@ -348,6 +361,53 @@ impl Drop for RemoveDirOnDrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Downloads a real AppImage (about 14 MB), so it only runs when asked:
+    /// `cargo test -- --ignored`
+    #[test]
+    #[ignore]
+    fn refuses_a_download_with_the_wrong_checksum() {
+        let dir = std::env::temp_dir().join(format!("outpost-test-checksum-{}", process::id()));
+        let paths = Paths {
+            applications: dir.join("apps"),
+            desktop_entries: dir.join("entries"),
+            icons: dir.join("icons"),
+            data: dir.join("data"),
+            cache: dir.join("cache"),
+        };
+        let url = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage";
+        let entry = StoreEntry { id: "appimagetool", version: "1", sha256: Some(&"0".repeat(64)) };
+
+        let error = install_from_url(&paths, url, Some(entry), |_, _| {}).unwrap_err();
+        assert!(error.contains("checksum"), "{error}");
+        // Nothing is left behind.
+        assert_eq!(fs::read_dir(&paths.applications).unwrap().count(), 0);
+        assert!(list(&paths).unwrap().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Downloads LocalSend 1.18.2 (about 66 MB) and checks it against the checksum
+    /// GitHub publishes for it. Only runs when asked: `cargo test -- --ignored`
+    #[test]
+    #[ignore]
+    fn accepts_a_download_with_the_right_checksum() {
+        let dir = std::env::temp_dir().join(format!("outpost-test-checksum-ok-{}", process::id()));
+        let paths = Paths {
+            applications: dir.join("apps"),
+            desktop_entries: dir.join("entries"),
+            icons: dir.join("icons"),
+            data: dir.join("data"),
+            cache: dir.join("cache"),
+        };
+        let url = "https://github.com/localsend/localsend/releases/download/v1.18.2/LocalSend-1.18.2-linux-x86-64.AppImage";
+        let sha256 = "19F21613D1834F6CAA69517113670461A3F10B80A2A315F86548C0663D9C0AAF"; // case shouldn't matter
+        let entry = StoreEntry { id: "localsend", version: "1.18.2", sha256: Some(sha256) };
+
+        let app = install_from_url(&paths, url, Some(entry), |_, _| {}).unwrap();
+        assert_eq!(app.index_id.as_deref(), Some("localsend"));
+        assert_eq!(app.version.as_deref(), Some("1.18.2"));
+        let _ = fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn sanitizes_ids() {

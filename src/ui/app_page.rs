@@ -230,8 +230,7 @@ impl Buttons {
             }
             self.stack.set_visible_child_name("progress");
         } else if let Some(installed) = self.store.installed_copy(&self.app) {
-            let outdated = installed.version.as_deref() != Some(self.app.latest_version.as_str());
-            self.update.set_visible(outdated && self.app.asset().is_some());
+            self.update.set_visible(self.store.has_update(&installed, &self.app));
             self.stack.set_visible_child_name("installed");
         } else if self.app.asset().is_some() {
             self.stack.set_visible_child_name("install");

@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
+use sha2::{Digest, Sha256};
 
 /// One HTTP client for the whole app, so connections get reused.
 pub fn client() -> &'static Client {
@@ -24,7 +25,8 @@ pub fn client() -> &'static Client {
 
 /// Downloads `url` into `dest`, calling `progress(downloaded, total)` as bytes arrive.
 /// `total` is `None` when the server doesn't say how big the file is.
-pub fn download(url: &str, dest: &Path, mut progress: impl FnMut(u64, Option<u64>)) -> Result<(), String> {
+/// Returns the file's SHA-256 checksum, worked out as it downloads.
+pub fn download(url: &str, dest: &Path, mut progress: impl FnMut(u64, Option<u64>)) -> Result<String, String> {
     let mut response = client()
         .get(url)
         .send()
@@ -33,6 +35,7 @@ pub fn download(url: &str, dest: &Path, mut progress: impl FnMut(u64, Option<u64
 
     let total = response.content_length();
     let mut file = File::create(dest).map_err(|e| format!("could not create {}: {e}", dest.display()))?;
+    let mut hasher = Sha256::new();
     let mut buffer = vec![0; 64 * 1024];
     let mut downloaded = 0;
     loop {
@@ -42,12 +45,13 @@ pub fn download(url: &str, dest: &Path, mut progress: impl FnMut(u64, Option<u64
         if n == 0 {
             break;
         }
+        hasher.update(&buffer[..n]);
         file.write_all(&buffer[..n])
             .map_err(|e| format!("could not write {}: {e}", dest.display()))?;
         downloaded += n as u64;
         progress(downloaded, total);
     }
-    Ok(())
+    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// reqwest's own messages are vague ("error sending request"); the useful detail,

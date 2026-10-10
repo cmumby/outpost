@@ -66,7 +66,7 @@ impl Store {
             let paths = store.paths.clone();
             let (id, version) = (app.id.clone(), app.latest_version.clone());
             let result = gio::spawn_blocking(move || {
-                let entry = StoreEntry { id: &id, version: &version };
+                let entry = StoreEntry { id: &id, version: &version, sha256: asset.sha256.as_deref() };
                 install::install_from_url(&paths, &asset.url, Some(entry), |done, total| {
                     progress.done.store(done, Ordering::Relaxed);
                     progress.total.store(total.unwrap_or(0), Ordering::Relaxed);

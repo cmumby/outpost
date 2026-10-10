@@ -19,6 +19,8 @@ const SUPPORTED_SCHEMA: u32 = 1;
 
 pub struct Index {
     pub apps: Vec<App>,
+    /// False when this is the saved copy, because nothing changed or we're offline.
+    pub fresh: bool,
 }
 
 /// The file as published. Apps are read one by one in `parse`, so a single broken
@@ -93,7 +95,8 @@ pub fn fetch(paths: &Paths) -> Result<Index, String> {
     let Some((body, etag)) = fresh else {
         return load_cached(paths, "the saved copy disappeared");
     };
-    let index = parse(&body)?;
+    let mut index = parse(&body)?;
+    index.fresh = true;
     let _ = fs::create_dir_all(&paths.cache);
     let _ = fs::write(&cached, &body);
     match etag {
@@ -126,7 +129,7 @@ fn parse(body: &[u8]) -> Result<Index, String> {
         .into_iter()
         .filter_map(|app| serde_json::from_value(app).ok())
         .collect();
-    Ok(Index { apps })
+    Ok(Index { apps, fresh: false })
 }
 
 /// The categories shown on the home page, using the freedesktop.org names apps use.
@@ -233,10 +236,13 @@ mod tests {
             cache: dir.join("cache"),
         };
         let first = fetch(&paths).unwrap();
+        assert!(first.fresh);
         assert!(first.apps.len() > 100);
         assert!(paths.cache.join("index.etag").exists());
         // The second fetch should get "not modified" and load the saved copy.
-        assert_eq!(fetch(&paths).unwrap().apps.len(), first.apps.len());
+        let second = fetch(&paths).unwrap();
+        assert!(!second.fresh);
+        assert_eq!(second.apps.len(), first.apps.len());
         let _ = fs::remove_dir_all(dir);
     }
 
