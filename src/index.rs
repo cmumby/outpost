@@ -38,6 +38,9 @@ pub struct App {
     pub summary: String,
     pub description: String,
     pub icon_url: Option<String>,
+    /// Added after the first release of the index, so older files may lack it.
+    #[serde(default)]
+    pub screenshot_urls: Vec<String>,
     pub categories: Vec<String>,
     pub source_repo: String,
     pub verified: bool,
@@ -192,6 +195,7 @@ mod tests {
             summary: summary.into(),
             description: String::new(),
             icon_url: None,
+            screenshot_urls: Vec::new(),
             categories: categories.iter().map(|c| c.to_string()).collect(),
             source_repo: String::new(),
             verified: false,

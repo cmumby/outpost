@@ -1,4 +1,4 @@
-//! App icons from the catalogue, downloaded on demand and cached on disk.
+//! App icons and screenshots from the catalogue, downloaded on demand and cached on disk.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -29,23 +29,41 @@ pub fn show(image: &gtk::Image, url: Option<&str>, cache: &Path, still_wanted: i
         image.set_paintable(Some(&texture));
         return;
     }
-
     let image = image.downgrade();
-    let url = url.to_string();
-    let file = cache.join("icons").join(file_name(&url));
-    glib::spawn_future_local(async move {
-        let fetch_url = url.clone();
-        let Ok(Some(bytes)) = gio::spawn_blocking(move || fetch(&fetch_url, &file)).await else {
-            return;
-        };
-        let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) else {
-            return;
-        };
-        LOADED.with_borrow_mut(|loaded| loaded.insert(url, texture.clone()));
+    let remember = url.to_string();
+    load(url, &cache.join("icons"), move |texture| {
+        LOADED.with_borrow_mut(|loaded| loaded.insert(remember, texture.clone()));
         if let Some(image) = image.upgrade()
             && still_wanted()
         {
             image.set_paintable(Some(&texture));
+        }
+    });
+}
+
+/// Shows a screenshot in `picture` once it has downloaded. Screenshots are cached on
+/// disk only; they're too big to keep in memory like icons.
+pub fn show_screenshot(picture: &gtk::Picture, url: &str, cache: &Path) {
+    let picture = picture.downgrade();
+    load(url, &cache.join("screenshots"), move |texture| {
+        if let Some(picture) = picture.upgrade() {
+            picture.set_paintable(Some(&texture));
+        }
+    });
+}
+
+/// Fetches an image on a background thread (or from the disk cache in `dir`) and
+/// hands it to `loaded` on the main thread. Failures are silent: a missing image
+/// just stays as its placeholder.
+fn load(url: &str, dir: &Path, loaded: impl FnOnce(gdk::Texture) + 'static) {
+    let url = url.to_string();
+    let file = dir.join(file_name(&url));
+    glib::spawn_future_local(async move {
+        let Ok(Some(bytes)) = gio::spawn_blocking(move || fetch(&url, &file)).await else {
+            return;
+        };
+        if let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
+            loaded(texture);
         }
     });
 }
