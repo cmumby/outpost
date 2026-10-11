@@ -562,7 +562,17 @@ fn register_desktop_entry(paths: &Paths) {
         crate::APP_ID
     );
     let path = paths.desktop_entries.join(format!("{}.desktop", crate::APP_ID));
-    if fs::read_to_string(&path).ok().as_deref() != Some(entry.as_str()) {
+    let existing = fs::read_to_string(&path).ok();
+    // A development build (cargo run) mustn't take the launcher over from an
+    // installed AppImage, or the launcher stops opening the copy that self-updates.
+    let points_at_appimage = existing.as_deref().is_some_and(|entry| {
+        entry
+            .lines()
+            .find_map(|line| line.strip_prefix("Exec="))
+            .is_some_and(|exec| std::path::Path::new(exec.trim_matches('"')).exists() && exec.contains(".AppImage"))
+    });
+    let dev_build_over_appimage = self_update::running_appimage().is_none() && points_at_appimage;
+    if !dev_build_over_appimage && existing.as_deref() != Some(entry.as_str()) {
         let _ = fs::create_dir_all(&paths.desktop_entries);
         changed |= fs::write(&path, entry).is_ok();
     }
