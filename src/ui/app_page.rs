@@ -86,13 +86,7 @@ fn header(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
         .xalign(0.0)
         .css_classes(["dim-label"])
         .build();
-    let badge = if app.verified {
-        "Verified source"
-    } else if app.is_curated() {
-        "Featured"
-    } else {
-        "From AppImageHub"
-    };
+    let badge = if app.verified { "Verified source" } else { "From AppImageHub" };
     let meta = gtk::Label::builder()
         .label(format!("Version {} · {badge}", app.latest_version))
         .wrap(true)

@@ -1,4 +1,4 @@
-//! The Explore tab's front page: featured apps, then categories.
+//! The Explore tab's front page: Featured, New & Updated, Popular, then categories.
 
 use std::rc::Rc;
 
@@ -18,14 +18,19 @@ pub fn build(store: &Rc<Store>) -> gtk::ScrolledWindow {
         .margin_end(12)
         .build();
 
-    let featured = adw::PreferencesGroup::builder()
-        .title("Featured")
-        .description("Hand-picked apps we've checked come from their official source")
-        .build();
-    for app in apps.iter().filter(|app| app.is_curated()) {
-        featured.add(&app_row(store, app));
+    let featured: Vec<_> = apps.iter().filter(|app| app.featured).cloned().collect();
+    if !featured.is_empty() {
+        let group = adw::PreferencesGroup::builder()
+            .title("Featured")
+            .description("Hand-picked apps we've checked come from their official source")
+            .build();
+        for app in &featured {
+            group.add(&app_row(store, app));
+        }
+        content.append(&group);
     }
-    content.append(&featured);
+    content.append(&section(store, "New & Updated", index::newest(&apps)));
+    content.append(&section(store, "Popular", index::popular(&apps)));
 
     let categories = adw::PreferencesGroup::builder().title("Categories").build();
     for &(key, title) in index::CATEGORIES {
@@ -52,6 +57,29 @@ pub fn build(store: &Rc<Store>) -> gtk::ScrolledWindow {
         .build()
 }
 
+/// A home page section: the first few apps, then a row that opens the full list.
+fn section(store: &Rc<Store>, title: &'static str, apps: Vec<Rc<App>>) -> adw::PreferencesGroup {
+    const SHOWN: usize = 5;
+    let group = adw::PreferencesGroup::builder()
+        .title(title)
+        .visible(!apps.is_empty())
+        .build();
+    for app in apps.iter().take(SHOWN) {
+        group.add(&app_row(store, app));
+    }
+    if apps.len() > SHOWN {
+        let all = adw::ActionRow::builder()
+            .title("See All")
+            .activatable(true)
+            .build();
+        all.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        let store = store.clone();
+        all.connect_activated(move |_| show_list(&store, title, &apps));
+        group.add(&all);
+    }
+    group
+}
+
 fn app_row(store: &Rc<Store>, app: &Rc<App>) -> adw::ActionRow {
     let row = adw::ActionRow::builder()
         .title(app.name.as_str())
@@ -72,8 +100,13 @@ fn app_row(store: &Rc<Store>, app: &Rc<App>) -> adw::ActionRow {
 
 fn show_category(store: &Rc<Store>, key: &str, title: &str) {
     let apps: Vec<_> = store.apps().iter().filter(|app| index::in_category(app, key)).cloned().collect();
+    show_list(store, title, &apps);
+}
+
+/// A full page listing `apps`, for categories and "See All".
+fn show_list(store: &Rc<Store>, title: &str, apps: &[Rc<App>]) {
     let (list, model) = app_list::build(store);
-    app_list::set_apps(&model, &apps);
+    app_list::set_apps(&model, apps);
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&adw::HeaderBar::new());

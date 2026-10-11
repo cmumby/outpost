@@ -44,9 +44,18 @@ pub struct App {
     pub categories: Vec<String>,
     pub source_repo: String,
     pub verified: bool,
+    /// Picked by hand to appear in Featured.
+    #[serde(default)]
+    pub featured: bool,
     /// `curated` or `appimagehub`.
     pub origin: String,
     pub latest_version: String,
+    /// When the latest version was released, as an ISO 8601 timestamp.
+    #[serde(default)]
+    pub released_at: Option<String>,
+    /// The source repo's GitHub stars.
+    #[serde(default)]
+    pub stars: u64,
     /// Keyed by architecture, e.g. `x86_64`.
     pub assets: HashMap<String, Asset>,
 }
@@ -64,8 +73,9 @@ impl App {
         self.assets.get(std::env::consts::ARCH)
     }
 
-    pub fn is_curated(&self) -> bool {
-        self.origin == "curated"
+    /// Curated or followed: apps we vouch for, rather than AppImageHub's open listing.
+    pub fn is_trusted(&self) -> bool {
+        self.origin != "appimagehub"
     }
 }
 
@@ -155,6 +165,28 @@ pub fn in_category(app: &App, key: &str) -> bool {
     })
 }
 
+/// Apps with the newest releases first. AppImageHub's open listing is only included
+/// once an app has some following (`MIN_STARS`), so New & Updated isn't swamped by
+/// every small project that happened to release today.
+pub fn newest(apps: &[Rc<App>]) -> Vec<Rc<App>> {
+    let mut newest: Vec<_> = apps
+        .iter()
+        .filter(|app| app.released_at.is_some() && (app.is_trusted() || app.stars >= MIN_STARS))
+        .cloned()
+        .collect();
+    newest.sort_by(|a, b| b.released_at.cmp(&a.released_at));
+    newest
+}
+
+/// Apps with the most GitHub stars first.
+pub fn popular(apps: &[Rc<App>]) -> Vec<Rc<App>> {
+    let mut popular = apps.to_vec();
+    popular.sort_by(|a, b| b.stars.cmp(&a.stars));
+    popular
+}
+
+const MIN_STARS: u64 = 100;
+
 /// Apps matching `query`, best matches first: names before summaries, and curated
 /// apps before others.
 pub fn search(apps: &[Rc<App>], query: &str) -> Vec<Rc<App>> {
@@ -180,7 +212,7 @@ pub fn search(apps: &[Rc<App>], query: &str) -> Vec<Rc<App>> {
             Some((score, app))
         })
         .collect();
-    matches.sort_by_key(|(score, app)| (*score, !app.is_curated(), app.name.to_lowercase()));
+    matches.sort_by_key(|(score, app)| (*score, !app.is_trusted(), app.name.to_lowercase()));
     matches.into_iter().map(|(_, app)| app.clone()).collect()
 }
 
@@ -199,8 +231,11 @@ mod tests {
             categories: categories.iter().map(|c| c.to_string()).collect(),
             source_repo: String::new(),
             verified: false,
+            featured: false,
             origin: origin.into(),
             latest_version: "1.0".into(),
+            released_at: None,
+            stars: 0,
             assets: HashMap::new(),
         })
     }
@@ -218,6 +253,24 @@ mod tests {
         let names: Vec<_> = results.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, ["Photo", "Photocraft", "Photo Viewer", "Editor"]);
         assert!(search(&apps, "  ").is_empty());
+    }
+
+    #[test]
+    fn sections_sort_by_release_date_and_stars() {
+        let mut quiet_hub = app("Quiet", "", "appimagehub", &[]);
+        let mut known_hub = app("Known", "", "appimagehub", &[]);
+        let mut followed = app("Followed", "", "followed", &[]);
+        Rc::get_mut(&mut quiet_hub).unwrap().released_at = Some("2026-10-12T00:00:00Z".into());
+        Rc::get_mut(&mut known_hub).unwrap().released_at = Some("2026-10-10T00:00:00Z".into());
+        Rc::get_mut(&mut known_hub).unwrap().stars = 500;
+        Rc::get_mut(&mut followed).unwrap().released_at = Some("2026-10-11T00:00:00Z".into());
+        Rc::get_mut(&mut followed).unwrap().stars = 50;
+        let apps = [quiet_hub, known_hub, followed];
+
+        let names = |list: Vec<Rc<App>>| list.iter().map(|a| a.name.clone()).collect::<Vec<_>>();
+        // The newest release is from an AppImageHub app with few stars, so it's left out.
+        assert_eq!(names(newest(&apps)), ["Followed", "Known"]);
+        assert_eq!(names(popular(&apps)), ["Known", "Followed", "Quiet"]);
     }
 
     #[test]
