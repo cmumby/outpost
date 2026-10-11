@@ -116,12 +116,65 @@ fn header(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
 }
 
 /// The app's screenshots, one at a time. With more than one, they can be swiped,
-/// scrolled or stepped through with the arrow buttons.
+/// scrolled or stepped through with the arrow buttons. Hidden until a screenshot has
+/// actually loaded; ones that fail (broken links are common) are dropped.
 fn screenshots(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
     let carousel = adw::Carousel::builder()
         .spacing(12)
         .allow_scroll_wheel(false)
         .build();
+    let overlay = gtk::Overlay::builder()
+        .child(&carousel)
+        .css_classes(["card"])
+        .overflow(gtk::Overflow::Hidden)
+        .build();
+    let dots = adw::CarouselIndicatorDots::builder().carousel(&carousel).build();
+    let section = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .visible(false)
+        .build();
+    section.append(&overlay);
+    section.append(&dots);
+
+    let mut arrows = Vec::new();
+    for (icon, step, align) in [
+        ("go-previous-symbolic", -1.0, gtk::Align::Start),
+        ("go-next-symbolic", 1.0, gtk::Align::End),
+    ] {
+        let button = gtk::Button::builder()
+            .icon_name(icon)
+            .halign(align)
+            .valign(gtk::Align::Center)
+            .margin_start(12)
+            .margin_end(12)
+            .css_classes(["circular", "osd"])
+            .build();
+        let carousel = carousel.clone();
+        button.connect_clicked(move |_| {
+            let last = carousel.n_pages().saturating_sub(1) as f64;
+            let target = (carousel.position() + step).round().clamp(0.0, last) as u32;
+            carousel.scroll_to(&carousel.nth_page(target), true);
+        });
+        overlay.add_overlay(&button);
+        arrows.push(button);
+    }
+
+    // Show the section, arrows and dots according to how many screenshots loaded.
+    let update = {
+        let (section, dots) = (section.clone(), dots.clone());
+        move |loaded: u32| {
+            section.set_visible(loaded > 0);
+            dots.set_visible(loaded > 1);
+            for arrow in &arrows {
+                arrow.set_visible(loaded > 1);
+            }
+        }
+    };
+    update(0);
+    let update = Rc::new(update);
+    let loaded = Rc::new(std::cell::Cell::new(0));
+
     for url in &app.screenshot_urls {
         let picture = gtk::Picture::builder()
             .content_fit(gtk::ContentFit::Contain)
@@ -129,43 +182,16 @@ fn screenshots(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
             .height_request(340)
             .hexpand(true)
             .build();
-        icons::show_screenshot(&picture, url, &store.paths.cache);
         carousel.append(&picture);
-    }
-
-    let overlay = gtk::Overlay::builder()
-        .child(&carousel)
-        .css_classes(["card"])
-        .overflow(gtk::Overflow::Hidden)
-        .build();
-    let section = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(6)
-        .build();
-    section.append(&overlay);
-
-    if app.screenshot_urls.len() > 1 {
-        for (icon, step, align) in [
-            ("go-previous-symbolic", -1.0, gtk::Align::Start),
-            ("go-next-symbolic", 1.0, gtk::Align::End),
-        ] {
-            let button = gtk::Button::builder()
-                .icon_name(icon)
-                .halign(align)
-                .valign(gtk::Align::Center)
-                .margin_start(12)
-                .margin_end(12)
-                .css_classes(["circular", "osd"])
-                .build();
-            let carousel = carousel.clone();
-            button.connect_clicked(move |_| {
-                let last = carousel.n_pages().saturating_sub(1) as f64;
-                let target = (carousel.position() + step).round().clamp(0.0, last) as u32;
-                carousel.scroll_to(&carousel.nth_page(target), true);
-            });
-            overlay.add_overlay(&button);
-        }
-        section.append(&adw::CarouselIndicatorDots::builder().carousel(&carousel).build());
+        let (carousel, loaded, update, page) = (carousel.clone(), loaded.clone(), update.clone(), picture.clone());
+        icons::show_screenshot(&picture, url, &store.paths.cache, move |shown| {
+            if shown {
+                loaded.set(loaded.get() + 1);
+            } else {
+                carousel.remove(&page);
+            }
+            update(loaded.get());
+        });
     }
     section
 }

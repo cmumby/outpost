@@ -32,6 +32,8 @@ pub fn show(image: &gtk::Image, url: Option<&str>, cache: &Path, still_wanted: i
     let image = image.downgrade();
     let remember = url.to_string();
     load(url, &cache.join("icons"), move |texture| {
+        // A missing icon just stays as the placeholder.
+        let Some(texture) = texture else { return };
         LOADED.with_borrow_mut(|loaded| loaded.insert(remember, texture.clone()));
         if let Some(image) = image.upgrade()
             && still_wanted()
@@ -41,30 +43,32 @@ pub fn show(image: &gtk::Image, url: Option<&str>, cache: &Path, still_wanted: i
     });
 }
 
-/// Shows a screenshot in `picture` once it has downloaded. Screenshots are cached on
-/// disk only; they're too big to keep in memory like icons.
-pub fn show_screenshot(picture: &gtk::Picture, url: &str, cache: &Path) {
+/// Shows a screenshot in `picture` once it has downloaded, then calls `done` with
+/// whether it worked. Screenshots are cached on disk only; they're too big to keep
+/// in memory like icons.
+pub fn show_screenshot(picture: &gtk::Picture, url: &str, cache: &Path, done: impl FnOnce(bool) + 'static) {
     let picture = picture.downgrade();
     load(url, &cache.join("screenshots"), move |texture| {
-        if let Some(picture) = picture.upgrade() {
-            picture.set_paintable(Some(&texture));
-        }
+        let shown = match (picture.upgrade(), texture) {
+            (Some(picture), Some(texture)) => {
+                picture.set_paintable(Some(&texture));
+                true
+            }
+            _ => false,
+        };
+        done(shown);
     });
 }
 
 /// Fetches an image on a background thread (or from the disk cache in `dir`) and
-/// hands it to `loaded` on the main thread. Failures are silent: a missing image
-/// just stays as its placeholder.
-fn load(url: &str, dir: &Path, loaded: impl FnOnce(gdk::Texture) + 'static) {
+/// hands it to `loaded` on the main thread, or `None` if it couldn't be fetched or
+/// read.
+fn load(url: &str, dir: &Path, loaded: impl FnOnce(Option<gdk::Texture>) + 'static) {
     let url = url.to_string();
     let file = dir.join(file_name(&url));
     glib::spawn_future_local(async move {
-        let Ok(Some(bytes)) = gio::spawn_blocking(move || fetch(&url, &file)).await else {
-            return;
-        };
-        if let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
-            loaded(texture);
-        }
+        let bytes = gio::spawn_blocking(move || fetch(&url, &file)).await.ok().flatten();
+        loaded(bytes.and_then(|bytes| gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()));
     });
 }
 

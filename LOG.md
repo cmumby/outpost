@@ -11,10 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done and tested locally; first release not published yet |
-
-**Unpushed in `outpost-index`:** `8fa3429` adds `curated/outpost.toml`
-(Outpost's own entry, used for self-update).
+| 5. Ship it | Done. v0.1.0 released at https://github.com/cmumby/outpost/releases |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -114,15 +111,10 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
 
 ## Next steps
 
-1. Create the public `cmumby/outpost` repo and push. The user may need to run
-   `gh repo create` themselves, since the agent was blocked from creating public
-   repos.
-2. Push `outpost-index` commit `8fa3429`.
-3. Tag `v0.1.0` to publish the first release. Then test self-update by
-   releasing `v0.1.1`.
-4. Screenshots on app pages: carry AppImageHub's screenshot field (3,017 of
-   about 3,050 apps have one) through the index, add `screenshots` to curated
-   files, and show them in a carousel on app pages.
+1. Check that installed v0.1.0 offers v0.2.0 as a self-update.
+2. Find a usable screenshot for LocalSend. Its official ones are WebP, which GTK
+   can't always open.
+3. Consider a separate `featured = true` flag once there are many curated apps.
 
 ## Testing notes
 
@@ -135,3 +127,15 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
 - Apps installed with the command line (Upscayl, LocalSend on this machine)
   don't get store updates, because they aren't linked to a store entry.
   Reinstalling them from the store fixes that.
+
+### After Phase 5: screenshots (v0.2.0)
+- The index carries AppImageHub's screenshots (3,017 of about 3,050 apps have
+  one) as `screenshot_urls`. Curated files can list `screenshots`, falling back
+  to AppImageHub's. Photocraft has its official demo screenshot.
+- App pages show screenshots in a carousel under the Install button, with arrow
+  buttons and dots when there's more than one. They load on demand and are
+  cached on disk.
+- About one AppImageHub screenshot link in eight is broken (404). The screenshot
+  area stays hidden until an image actually loads, and failed ones are dropped,
+  so those apps show no empty frame.
+- Upscayl has two screenshots and Zen Browser one, added in their curated files.
