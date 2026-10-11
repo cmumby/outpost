@@ -6,6 +6,7 @@ mod app_page;
 mod home;
 mod icons;
 mod installed_page;
+mod welcome;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +21,7 @@ use gtk::{gio, glib};
 use crate::appimage;
 use crate::index::{self, App};
 use crate::install;
+use crate::self_update;
 use crate::paths::Paths;
 use crate::state::InstalledApp;
 use actions::InstallProgress;
@@ -40,6 +42,8 @@ pub struct Store {
     pub nav: adw::NavigationView,
     toasts: adw::ToastOverlay,
     apps: RefCell<Rc<Vec<Rc<App>>>>,
+    /// Outpost's own catalogue entry, kept out of the app lists.
+    own_listing: RefCell<Option<Rc<App>>>,
     installed: RefCell<Vec<InstalledApp>>,
     /// Installs in progress, by store id.
     installing: RefCell<HashMap<String, Arc<InstallProgress>>>,
@@ -187,11 +191,13 @@ pub fn build_window(application: &adw::Application) {
         installing: RefCell::default(),
         watchers: RefCell::default(),
         announced_updates: RefCell::default(),
+        own_listing: RefCell::default(),
     });
 
     nav.add(&main_page(&store));
     store.reload_installed();
     window.present();
+    welcome::show_first_time(&store);
 }
 
 /// The first page: Explore and Installed tabs, with search.
@@ -251,16 +257,30 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.add_top_bar(&search_bar);
+    let update_banner = self_update_banner(store);
+    toolbar.add_top_bar(&update_banner);
+    if let Some(banner) = move_home_banner(store) {
+        toolbar.add_top_bar(&banner);
+    }
     if !appimage::libfuse2_installed() {
         toolbar.add_top_bar(&libfuse2_banner(store));
     }
     toolbar.set_content(Some(&stack));
 
     // Explore shows a spinner while the catalogue loads, then home or search results.
+    // (gtk::Spinner rather than libadwaita's newer spinner, so the AppImage can be
+    // built against Ubuntu 24.04's libraries.)
     explore.add_named(
         &adw::StatusPage::builder()
             .title("Loading apps…")
-            .paintable(&adw::SpinnerPaintable::new(Some(&explore)))
+            .child(
+                &gtk::Spinner::builder()
+                    .spinning(true)
+                    .width_request(48)
+                    .height_request(48)
+                    .halign(gtk::Align::Center)
+                    .build(),
+            )
             .build(),
         Some("loading"),
     );
@@ -319,6 +339,7 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
             let store = store.clone();
             let explore = explore.clone();
             let error_page = error_page.clone();
+            let update_banner = update_banner.clone();
             glib::spawn_future_local(async move {
                 let paths = store.paths.clone();
                 let result = gio::spawn_blocking(move || index::fetch(&paths))
@@ -327,7 +348,10 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
                 match result {
                     Ok(index) if quiet && !index.fresh => {}
                     Ok(index) => {
-                        *store.apps.borrow_mut() = Rc::new(index.apps.into_iter().map(Rc::new).collect());
+                        let (own, apps): (Vec<_>, Vec<_>) =
+                            index.apps.into_iter().map(Rc::new).partition(|app| app.id == self_update::INDEX_ID);
+                        *store.own_listing.borrow_mut() = own.into_iter().next();
+                        *store.apps.borrow_mut() = Rc::new(apps);
                         let showing_home = explore.visible_child_name().as_deref() == Some("home");
                         if let Some(old) = explore.child_by_name("home") {
                             explore.remove(&old);
@@ -346,6 +370,7 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
                 }
                 // Also picks up apps installed or removed from the command line.
                 store.reload_installed();
+                offer_self_update(&store, &update_banner);
             });
         })
     };
@@ -371,6 +396,105 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
         .tag("main")
         .child(&toolbar)
         .build()
+}
+
+/// The banner offering a newer Outpost. Hidden until there is one.
+fn self_update_banner(store: &Rc<Store>) -> adw::Banner {
+    let banner = adw::Banner::new("");
+    let store = Rc::downgrade(store);
+    banner.connect_button_clicked(move |banner| {
+        let Some(store) = store.upgrade() else { return };
+        match banner.button_label().as_deref() {
+            Some("Restart") => restart(&store),
+            _ => start_self_update(&store, banner),
+        }
+    });
+    banner
+}
+
+/// Reveals the update banner when the catalogue has a newer Outpost than this one.
+/// Only an AppImage can update itself; development builds never offer it.
+fn offer_self_update(store: &Store, banner: &adw::Banner) {
+    if banner.is_revealed() || self_update::running_appimage().is_none() {
+        return;
+    }
+    let Some(own) = store.own_listing.borrow().clone() else { return };
+    if own.asset().is_some() && self_update::is_newer(&own.latest_version, env!("CARGO_PKG_VERSION")) {
+        banner.set_title(&format!("Outpost {} is available", own.latest_version));
+        banner.set_button_label(Some("Update"));
+        banner.set_revealed(true);
+    }
+}
+
+fn start_self_update(store: &Rc<Store>, banner: &adw::Banner) {
+    let (Some(appimage), Some(own)) = (self_update::running_appimage(), store.own_listing.borrow().clone()) else {
+        return;
+    };
+    let Some(asset) = own.asset().cloned() else { return };
+    banner.set_title(&format!("Updating Outpost to {}…", own.latest_version));
+    banner.set_button_label(None);
+
+    let store = store.clone();
+    let banner = banner.clone();
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(move || self_update::update(&appimage, &asset, |_, _| {}))
+            .await
+            .unwrap_or_else(|_| Err("the updater crashed".into()));
+        match result {
+            Ok(()) => {
+                banner.set_title(&format!("Outpost {} is ready", own.latest_version));
+                banner.set_button_label(Some("Restart"));
+            }
+            Err(e) => {
+                banner.set_revealed(false);
+                store.alert("Couldn't Update Outpost", &e);
+            }
+        }
+    });
+}
+
+/// Restarts Outpost from its AppImage (for example after an update or a move).
+pub fn restart(store: &Store) {
+    let Some(appimage) = self_update::running_appimage() else { return };
+    restart_from(store, &appimage);
+}
+
+pub fn restart_from(store: &Store, appimage: &std::path::Path) {
+    match self_update::relaunch_after_exit(appimage) {
+        Ok(()) => {
+            if let Some(application) = store.window.application() {
+                application.quit();
+            }
+        }
+        Err(e) => store.alert("Couldn't Restart Outpost", &e),
+    }
+}
+
+/// Offers to move Outpost into ~/Applications when it's running from somewhere else,
+/// such as Downloads. (The welcome screen offers this too, but can be skipped.)
+fn move_home_banner(store: &Rc<Store>) -> Option<adw::Banner> {
+    let appimage = self_update::running_appimage()?;
+    if appimage == self_update::home(&store.paths) {
+        return None;
+    }
+    let folder = appimage
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .map_or_else(|| "another folder".to_string(), |name| name.to_string_lossy().into_owned());
+    let banner = adw::Banner::builder()
+        .title(format!("Outpost is running from {folder}"))
+        .button_label("Move to Applications")
+        .revealed(true)
+        .build();
+    let store = Rc::downgrade(store);
+    banner.connect_button_clicked(move |_| {
+        let Some(store) = store.upgrade() else { return };
+        match self_update::move_home(&store.paths, &appimage) {
+            Ok(new_home) => restart_from(&store, &new_home),
+            Err(e) => store.alert("Couldn't Move Outpost", &e),
+        }
+    });
+    Some(banner)
 }
 
 /// Shown when libfuse2 is missing, since most AppImages won't open without it.

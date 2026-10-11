@@ -1,0 +1,61 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds the AppImages and publishes them as a GitHub
+# release. The outpost-index picks the new release up within the hour, and
+# running copies of Outpost then offer it as an update.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # Built on Ubuntu 24.04 so the AppImages run on it and anything newer.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libfuse2t64 file
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check the tag matches Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $version in Cargo.toml" >&2
+            exit 1
+          fi
+
+      - run: cargo test
+
+      - run: ./packaging/build-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage-${{ matrix.runner }}
+          path: target/appimage/Outpost-*.AppImage
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" Outpost-*.AppImage --repo "$GITHUB_REPOSITORY" --title "Outpost ${GITHUB_REF_NAME#v}" --generate-notes

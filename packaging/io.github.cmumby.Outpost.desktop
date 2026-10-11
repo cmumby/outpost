@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Outpost
+Comment=Find, install and update AppImages
+Exec=outpost
+Icon=io.github.cmumby.Outpost
+Categories=System;PackageManager;
+StartupNotify=true
