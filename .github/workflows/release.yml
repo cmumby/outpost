@@ -24,7 +24,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libfuse2t64 file
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libfuse2t64 file binutils
 
       - uses: dtolnay/rust-toolchain@stable
 

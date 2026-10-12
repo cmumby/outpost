@@ -44,7 +44,7 @@ pub fn build(store: &Rc<Store>) -> gtk::ScrolledWindow {
             .activatable(true)
             .build();
         row.add_suffix(&gtk::Label::builder().label(count.to_string()).css_classes(["dim-label"]).build());
-        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        row.add_suffix(&gtk::Image::from_icon_name("outpost-go-next-symbolic"));
         let store = store.clone();
         row.connect_activated(move |_| show_category(&store, key, title));
         categories.add(&row);
@@ -61,7 +61,8 @@ pub fn build(store: &Rc<Store>) -> gtk::ScrolledWindow {
 fn section(store: &Rc<Store>, title: &'static str, apps: Vec<Rc<App>>) -> adw::PreferencesGroup {
     const SHOWN: usize = 5;
     let group = adw::PreferencesGroup::builder()
-        .title(title)
+        // Group titles are read as markup, so "&" has to be escaped.
+        .title(gtk::glib::markup_escape_text(title).as_str())
         .visible(!apps.is_empty())
         .build();
     for app in apps.iter().take(SHOWN) {
@@ -72,7 +73,7 @@ fn section(store: &Rc<Store>, title: &'static str, apps: Vec<Rc<App>>) -> adw::P
             .title("See All")
             .activatable(true)
             .build();
-        all.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        all.add_suffix(&gtk::Image::from_icon_name("outpost-go-next-symbolic"));
         let store = store.clone();
         all.connect_activated(move |_| show_list(&store, title, &apps));
         group.add(&all);
@@ -91,7 +92,7 @@ fn app_row(store: &Rc<Store>, app: &Rc<App>) -> adw::ActionRow {
     let icon = gtk::Image::builder().pixel_size(48).build();
     icons::show(&icon, app.icon_url.as_deref(), &store.paths.cache, || true);
     row.add_prefix(&icon);
-    row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    row.add_suffix(&gtk::Image::from_icon_name("outpost-go-next-symbolic"));
     let store = store.clone();
     let app = app.clone();
     row.connect_activated(move |_| store.show_app(&app));

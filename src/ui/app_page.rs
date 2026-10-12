@@ -133,8 +133,8 @@ fn screenshots(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
 
     let mut arrows = Vec::new();
     for (icon, step, align) in [
-        ("go-previous-symbolic", -1.0, gtk::Align::Start),
-        ("go-next-symbolic", 1.0, gtk::Align::End),
+        ("outpost-go-previous-symbolic", -1.0, gtk::Align::Start),
+        ("outpost-go-next-symbolic", 1.0, gtk::Align::End),
     ] {
         let button = gtk::Button::builder()
             .icon_name(icon)

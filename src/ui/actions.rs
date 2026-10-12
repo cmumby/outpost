@@ -114,6 +114,7 @@ impl Store {
             .ok_or_else(|| "its launcher entry is missing".to_string())
             .and_then(|info| {
                 let context = WidgetExt::display(&self.window).app_launch_context();
+                clean_environment(&context);
                 info.launch(&[], Some(&context)).map_err(|e| e.to_string())
             });
         if let Err(e) = launched {
@@ -125,6 +126,34 @@ impl Store {
         let dialog = adw::AlertDialog::new(Some(heading), Some(body));
         dialog.add_response("close", "Close");
         dialog.present(Some(&self.window));
+    }
+}
+
+/// Inside its AppImage, Outpost runs with settings that point GTK at its own bundled
+/// libraries. Apps it opens shouldn't inherit those, or another GTK app could load
+/// Outpost's copies and break.
+fn clean_environment(context: &gtk::gdk::AppLaunchContext) {
+    let Some(appdir) = std::env::var_os("APPDIR") else { return };
+    for name in [
+        "APPDIR",
+        "APPIMAGE",
+        "ARGV0",
+        "OWD",
+        "GTK_DATA_PREFIX",
+        "GTK_EXE_PREFIX",
+        "GTK_PATH",
+        "GSETTINGS_SCHEMA_DIR",
+        "GI_TYPELIB_PATH",
+        "GDK_PIXBUF_MODULE_FILE",
+        "GIO_LAUNCH_DESKTOP",
+    ] {
+        context.unsetenv(name);
+    }
+    if let Some(dirs) = std::env::var_os("XDG_DATA_DIRS") {
+        let kept: Vec<_> = std::env::split_paths(&dirs).filter(|dir| !dir.starts_with(&appdir)).collect();
+        if let Ok(joined) = std::env::join_paths(kept) {
+            context.setenv("XDG_DATA_DIRS", joined);
+        }
     }
 }
 

@@ -167,6 +167,7 @@ pub fn build_window(application: &adw::Application) {
 
     register_desktop_entry(&paths);
     gtk::Window::set_default_icon_name(crate::APP_ID);
+    add_fallback_icons(&paths);
 
     let window = adw::ApplicationWindow::builder()
         .application(application)
@@ -206,12 +207,12 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
     let explore = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::Crossfade)
         .build();
-    stack.add_titled_with_icon(&explore, Some("explore"), "Explore", "system-search-symbolic");
+    stack.add_titled_with_icon(&explore, Some("explore"), "Explore", "outpost-system-search-symbolic");
     let installed_tab = stack.add_titled_with_icon(
         &installed_page::build(store),
         Some("installed"),
         "Installed",
-        "emblem-ok-symbolic",
+        "outpost-object-select-symbolic",
     );
     // Show how many updates are waiting on the Installed tab, and tell the user.
     {
@@ -237,7 +238,7 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
     search_bar.connect_entry(&search_entry);
     search_bar.set_key_capture_widget(Some(&store.window));
     let search_button = gtk::ToggleButton::builder()
-        .icon_name("system-search-symbolic")
+        .icon_name("outpost-system-search-symbolic")
         .tooltip_text("Search (Ctrl+F)")
         .build();
     search_button
@@ -285,7 +286,7 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
         Some("loading"),
     );
     let error_page = adw::StatusPage::builder()
-        .icon_name("network-offline-symbolic")
+        .icon_name("outpost-network-offline-symbolic")
         .title("Couldn't Load Apps")
         .build();
     let retry = gtk::Button::builder()
@@ -299,7 +300,7 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
     explore.add_named(&results, Some("results"));
     explore.add_named(
         &adw::StatusPage::builder()
-            .icon_name("system-search-symbolic")
+            .icon_name("outpost-system-search-symbolic")
             .title("No Results")
             .description("Try a different search")
             .build(),
@@ -523,6 +524,41 @@ fn libfuse2_banner(store: &Rc<Store>) -> adw::Banner {
 /// Outpost's own icons, built into the program so it never depends on the theme.
 const ICON: &[u8] = include_bytes!("../../data/icons/io.github.cmumby.Outpost.svg");
 const SYMBOLIC_ICON: &[u8] = include_bytes!("../../data/icons/io.github.cmumby.Outpost-symbolic.svg");
+
+/// Outpost's own copies of the GNOME icons it uses, under `outpost-` names so they
+/// look the same on every desktop. Other icon themes (KDE's Breeze, for one) lack
+/// some of these or draw them in ways GTK 4 apps can't show. See
+/// data/icons/fallback/README.md.
+const FALLBACK_ICONS: &[(&str, &[u8])] = &[
+    ("outpost-application-x-executable-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-application-x-executable-symbolic.svg")),
+    ("outpost-dialog-warning-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-dialog-warning-symbolic.svg")),
+    ("outpost-folder-download-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-folder-download-symbolic.svg")),
+    ("outpost-folder-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-folder-symbolic.svg")),
+    ("outpost-go-next-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-go-next-symbolic.svg")),
+    ("outpost-go-previous-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-go-previous-symbolic.svg")),
+    ("outpost-network-offline-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-network-offline-symbolic.svg")),
+    ("outpost-object-select-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-object-select-symbolic.svg")),
+    ("outpost-system-search-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-system-search-symbolic.svg")),
+    ("outpost-system-software-install-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-system-software-install-symbolic.svg")),
+    ("outpost-user-home-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-user-home-symbolic.svg")),
+    ("outpost-user-trash-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-user-trash-symbolic.svg")),
+];
+
+/// Puts Outpost's icons in an extra icon search path. Loose files there are found
+/// by name, and no theme has icons with these names, so ours are always used.
+fn add_fallback_icons(paths: &Paths) {
+    let dir = paths.cache.join("fallback-icons");
+    let _ = fs::create_dir_all(&dir);
+    for (name, bytes) in FALLBACK_ICONS {
+        let path = dir.join(name);
+        if fs::read(&path).ok().as_deref() != Some(*bytes) {
+            let _ = fs::write(&path, bytes);
+        }
+    }
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::IconTheme::for_display(&display).add_search_path(&dir);
+    }
+}
 
 /// Adds Outpost itself to the launcher, with its icon. GNOME only shows an app's
 /// notifications if it has a launcher entry, and this also makes Outpost easy to

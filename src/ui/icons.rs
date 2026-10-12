@@ -12,7 +12,7 @@ use gtk::{gdk, gio, glib};
 
 use crate::download;
 
-const PLACEHOLDER: &str = "application-x-executable";
+const PLACEHOLDER: &str = "outpost-application-x-executable-symbolic";
 
 thread_local! {
     /// Icons already loaded this session, so scrolling back doesn't reload them.

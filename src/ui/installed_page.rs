@@ -12,7 +12,7 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
     let stack = gtk::Stack::new();
     stack.add_named(
         &adw::StatusPage::builder()
-            .icon_name("system-software-install-symbolic")
+            .icon_name("outpost-system-software-install-symbolic")
             .title("Nothing Installed Yet")
             .description("Apps you install from Explore will show up here")
             .build(),
@@ -109,7 +109,7 @@ fn app_row(store: &Rc<Store>, app: &InstalledApp) -> adw::ActionRow {
         .valign(gtk::Align::Center)
         .build();
     let uninstall = gtk::Button::builder()
-        .icon_name("user-trash-symbolic")
+        .icon_name("outpost-user-trash-symbolic")
         .tooltip_text("Uninstall")
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
@@ -125,7 +125,7 @@ fn app_row(store: &Rc<Store>, app: &InstalledApp) -> adw::ActionRow {
     // Apps from the store link to their store page.
     if let Some(listing) = store.listing_for(app) {
         row.set_activatable(true);
-        row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        row.add_suffix(&gtk::Image::from_icon_name("outpost-go-next-symbolic"));
         let store = store.clone();
         row.connect_activated(move |_| store.show_app(&listing));
     }

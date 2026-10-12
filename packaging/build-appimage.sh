@@ -49,6 +49,18 @@ linuxdeploy \
 # and GDK_BACKEND=x11 runs through XWayland, where windows can stop redrawing.
 sed -i -e '/^export GTK_THEME=/d' -e '/^export GDK_BACKEND=/d' "$appdir/apprun-hooks/linuxdeploy-plugin-gtk.sh"
 
+# GIO launches apps through a small helper, gio-launch-desktop, at a path baked in
+# for the build machine's distro (Debian's layout here). Other distros keep it
+# elsewhere, so ship it and point GIO at it, or opening apps fails on, say, Arch.
+# Copy the very file the bundled GIO would have used, so it matches its architecture.
+helper=$(strings "$appdir/usr/lib/libgio-2.0.so.0" | grep -m1 '/gio-launch-desktop$' || true)
+if [ ! -x "$helper" ]; then
+    echo "gio-launch-desktop not found at '$helper'; install GLib's tools (libglib2.0-0t64 on Ubuntu)" >&2
+    exit 1
+fi
+install -m 755 "$helper" "$appdir/usr/bin/gio-launch-desktop"
+echo 'export GIO_LAUNCH_DESKTOP="$APPDIR/usr/bin/gio-launch-desktop"' >> "$appdir/apprun-hooks/linuxdeploy-plugin-gtk.sh"
+
 linuxdeploy --appdir "$appdir" --output appimage
 
 echo "Built $OUTPUT"

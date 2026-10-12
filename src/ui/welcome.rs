@@ -17,20 +17,20 @@ pub fn show_first_time(store: &Rc<Store>) {
 
     let things = adw::PreferencesGroup::new();
     things.add(&row(
-        "folder-symbolic",
+        "outpost-folder-symbolic",
         "Apps go in your Applications folder",
         "~/Applications, with launcher entries and icons added for you",
     ));
     things.add(&row(
-        "user-home-symbolic",
+        "outpost-user-home-symbolic",
         "No admin password needed",
         "Everything stays in your home folder",
     ));
     if appimage::libfuse2_installed() {
-        things.add(&row("emblem-ok-symbolic", "Ready to run AppImages", "libfuse2 is installed"));
+        things.add(&row("outpost-object-select-symbolic", "Ready to run AppImages", "libfuse2 is installed"));
     } else {
         let fuse = row(
-            "dialog-warning-symbolic",
+            "outpost-dialog-warning-symbolic",
             "Install libfuse2 first",
             &format!("Most AppImages need it. In a terminal, run: {}", appimage::libfuse2_fix()),
         );
@@ -44,7 +44,7 @@ pub fn show_first_time(store: &Rc<Store>) {
         && appimage != self_update::home(&store.paths)
     {
         let keep = row(
-            "folder-download-symbolic",
+            "outpost-folder-download-symbolic",
             "Keep Outpost in Applications",
             "Moves it to ~/Applications/Outpost.AppImage, so it's easy to find and can update itself",
         );
