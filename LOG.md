@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. v0.1.0 released at https://github.com/cmumby/outpost/releases |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.3.0) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -111,10 +111,13 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
 
 ## Next steps
 
-1. Check that installed v0.1.0 offers v0.2.0 as a self-update.
-2. Find a usable screenshot for LocalSend. Its official ones are WebP, which GTK
+1. Check on the CachyOS/KDE machine that v0.3.0 opens apps and shows its icons.
+2. Decide what Featured should be: dropped, automatic (weekly rotating picks of
+   verified apps), or manual as now (`featured = true`).
+3. Read names, categories and screenshots from inside each AppImage (step 3 of
+   the automation plan), so followed apps get categories and correct names.
+4. Find a usable screenshot for LocalSend. Its official ones are WebP, which GTK
    can't always open.
-3. Consider a separate `featured = true` flag once there are many curated apps.
 
 ## Testing notes
 
@@ -139,3 +142,19 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   area stays hidden until an image actually loads, and failed ones are dropped,
   so those apps show no empty frame.
 - Upscayl has two screenshots and Zen Browser one, added in their curated files.
+
+### v0.3.0: less manual curation, and fixes outside Ubuntu/GNOME
+- Self-update from v0.1.0 to v0.2.0 worked on this machine.
+- `outpost-index` gained `follow.toml`: every AppImage-publishing repo under a
+  followed GitHub account is included, verified, with its icon found in the
+  repo. `owners = ["storytold"]` brought in all 12 Craft apps.
+- Every app carries GitHub stars and its latest release date. The home page adds
+  New & Updated and Popular, worked out automatically; Featured shows only
+  curated apps with `featured = true`.
+- Opening apps failed on CachyOS: the bundled GIO looked for its launch helper at
+  Debian's path. The AppImage now ships the helper and points GIO at it, and apps
+  Outpost opens no longer inherit the AppImage's GTK settings.
+- Icons were missing on KDE: Outpost now uses its own `outpost-` named copies of
+  the Adwaita icons it needs (`data/icons/fallback/`).
+- Running `cargo run` no longer points the launcher away from the installed
+  AppImage.
