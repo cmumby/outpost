@@ -167,7 +167,7 @@ pub fn build_window(application: &adw::Application) {
 
     register_desktop_entry(&paths);
     gtk::Window::set_default_icon_name(crate::APP_ID);
-    add_fallback_icons(&paths);
+    add_interface_icons();
 
     let window = adw::ApplicationWindow::builder()
         .application(application)
@@ -525,38 +525,15 @@ fn libfuse2_banner(store: &Rc<Store>) -> adw::Banner {
 const ICON: &[u8] = include_bytes!("../../data/icons/io.github.cmumby.Outpost.svg");
 const SYMBOLIC_ICON: &[u8] = include_bytes!("../../data/icons/io.github.cmumby.Outpost-symbolic.svg");
 
-/// Outpost's own copies of the GNOME icons it uses, under `outpost-` names so they
-/// look the same on every desktop. Other icon themes (KDE's Breeze, for one) lack
-/// some of these or draw them in ways GTK 4 apps can't show. See
+/// Registers Outpost's interface icons: copies of the GNOME icons it uses, under
+/// `outpost-` names so they look the same on every desktop (other icon themes, such
+/// as KDE's Breeze, lack some or draw them in ways GTK 4 can't show). They're
+/// compiled in as a resource, which GTK recolors for light and dark mode. See
 /// data/icons/fallback/README.md.
-const FALLBACK_ICONS: &[(&str, &[u8])] = &[
-    ("outpost-application-x-executable-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-application-x-executable-symbolic.svg")),
-    ("outpost-dialog-warning-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-dialog-warning-symbolic.svg")),
-    ("outpost-folder-download-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-folder-download-symbolic.svg")),
-    ("outpost-folder-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-folder-symbolic.svg")),
-    ("outpost-go-next-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-go-next-symbolic.svg")),
-    ("outpost-go-previous-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-go-previous-symbolic.svg")),
-    ("outpost-network-offline-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-network-offline-symbolic.svg")),
-    ("outpost-object-select-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-object-select-symbolic.svg")),
-    ("outpost-system-search-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-system-search-symbolic.svg")),
-    ("outpost-system-software-install-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-system-software-install-symbolic.svg")),
-    ("outpost-user-home-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-user-home-symbolic.svg")),
-    ("outpost-user-trash-symbolic.svg", include_bytes!("../../data/icons/fallback/outpost-user-trash-symbolic.svg")),
-];
-
-/// Puts Outpost's icons in an extra icon search path. Loose files there are found
-/// by name, and no theme has icons with these names, so ours are always used.
-fn add_fallback_icons(paths: &Paths) {
-    let dir = paths.cache.join("fallback-icons");
-    let _ = fs::create_dir_all(&dir);
-    for (name, bytes) in FALLBACK_ICONS {
-        let path = dir.join(name);
-        if fs::read(&path).ok().as_deref() != Some(*bytes) {
-            let _ = fs::write(&path, bytes);
-        }
-    }
+fn add_interface_icons() {
+    gio::resources_register_include!("icons.gresource").expect("the icons are compiled in");
     if let Some(display) = gtk::gdk::Display::default() {
-        gtk::IconTheme::for_display(&display).add_search_path(&dir);
+        gtk::IconTheme::for_display(&display).add_resource_path("/io/github/cmumby/Outpost/icons");
     }
 }
 

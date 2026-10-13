@@ -5,6 +5,9 @@ Copies of the GNOME Adwaita icons Outpost's interface uses, renamed with an
 the same everywhere: other themes, such as KDE's Breeze, lack some of these icons or
 draw them in ways GTK 4 apps can't show.
 
+They're compiled into the program as a GTK resource (see `icons.gresource.xml`
+and `build.rs`), so GTK recolors them for light and dark mode.
+
 `outpost-application-x-executable-symbolic.svg` is the placeholder shown while an
 app's own icon loads.
 

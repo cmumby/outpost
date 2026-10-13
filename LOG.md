@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.3.0) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.3.1) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -158,3 +158,10 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   the Adwaita icons it needs (`data/icons/fallback/`).
 - Running `cargo run` no longer points the launcher away from the installed
   AppImage.
+
+### v0.3.1: icons readable in dark mode
+- The `outpost-` interface icons showed dark grey in dark mode in the AppImage.
+  The AppImage's older GTK (Ubuntu 24.04's) only recolors symbolic icons loaded
+  the standard way, not loose files on an icon search path. The icons are now
+  compiled into the program as a GTK resource (`build.rs`, using the
+  `glib-build-tools` build dependency), which every GTK version recolors.
