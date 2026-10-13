@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.3.1) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.3.2) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -165,3 +165,16 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   the standard way, not loose files on an icon search path. The icons are now
   compiled into the program as a GTK resource (`build.rs`, using the
   `glib-build-tools` build dependency), which every GTK version recolors.
+
+### v0.3.2: SVG icons on CachyOS
+- v0.3.1 still showed "image missing" for every SVG icon on CachyOS, GTK's own
+  included. GTK's debug output: "Unable to load image-loading module:
+  libpixbufloader-svg.so: cannot open shared object file". The bundled loader list
+  names loaders by bare file name and leaves finding them to the system's library
+  loader, which works on Ubuntu but not on CachyOS. The AppImage now writes a copy
+  of the list with full paths at startup (`$XDG_RUNTIME_DIR/outpost-pixbuf-loaders.cache`).
+- Also from debugging: the AppImage no longer loads the system's GIO plugins
+  (gvfs) and ships without GTK's video plugin (GStreamer), both of which printed
+  "undefined symbol" errors against the bundled GLib on Ubuntu 26.04.
+- Debugging tip: `G_MESSAGES_DEBUG=all ~/Applications/Outpost.AppImage` prints
+  GTK's reasons for icons failing to load.

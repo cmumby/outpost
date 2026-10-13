@@ -61,6 +61,25 @@ fi
 install -m 755 "$helper" "$appdir/usr/bin/gio-launch-desktop"
 echo 'export GIO_LAUNCH_DESKTOP="$APPDIR/usr/bin/gio-launch-desktop"' >> "$appdir/apprun-hooks/linuxdeploy-plugin-gtk.sh"
 
+# The image loader list names each loader by bare file name ("libpixbufloader-svg.so"),
+# leaving the system's library loader to find it. On some distros (CachyOS, for one)
+# it doesn't, and every SVG icon fails to load. At startup, write a copy of the list
+# with full paths into the AppImage and use that instead.
+cat >> "$appdir/apprun-hooks/linuxdeploy-plugin-gtk.sh" <<'HOOK'
+loaders="$APPDIR/usr/lib/gdk-pixbuf-2.0/2.10.0"
+cache="${XDG_RUNTIME_DIR:-/tmp}/outpost-pixbuf-loaders.cache"
+if sed "s|^\"libpixbufloader|\"$loaders/loaders/libpixbufloader|" "$loaders/loaders.cache" > "$cache"; then
+    export GDK_PIXBUF_MODULE_FILE="$cache"
+fi
+# Don't load the system's GIO plugins (such as gvfs); they're built for a newer GLib
+# than the one bundled here.
+export GIO_MODULE_DIR="$APPDIR/usr/lib/gio/modules"
+HOOK
+
+# GTK's video plugin pulls in the system's GStreamer, which doesn't match the bundled
+# GLib. Outpost doesn't play video, so leave it out.
+rm -rf "$appdir/usr/lib/gtk-4.0/4.0.0/media"
+
 linuxdeploy --appdir "$appdir" --output appimage
 
 echo "Built $OUTPUT"
