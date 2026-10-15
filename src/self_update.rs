@@ -4,8 +4,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+use std::sync::Mutex;
 
-use crate::download;
+use crate::{download, install, settings};
 use crate::index::Asset;
 use crate::paths::Paths;
 
@@ -17,11 +18,30 @@ pub fn home(paths: &Paths) -> PathBuf {
     paths.applications.join("Outpost.AppImage")
 }
 
+/// Where Outpost's own AppImage went, if it was moved while running.
+static MOVED_TO: Mutex<Option<PathBuf>> = Mutex::new(None);
+
 /// The AppImage file Outpost is running from, or `None` for a development build.
 /// (The running program itself is inside a temporary mount; the AppImage runtime
 /// puts the real file's path in $APPIMAGE.)
 pub fn running_appimage() -> Option<PathBuf> {
+    if let Some(moved) = MOVED_TO.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        return Some(moved);
+    }
     std::env::var_os("APPIMAGE").map(PathBuf::from)
+}
+
+/// After the apps folder changes: moves Outpost's own AppImage along with the apps,
+/// if it was in the old apps folder. Returns where it went.
+pub fn follow_apps_folder(paths: &Paths, old_folder: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(appimage) = running_appimage() else { return Ok(None) };
+    let dest = home(paths);
+    if appimage.parent() != Some(old_folder) || appimage == dest || !appimage.exists() {
+        return Ok(None);
+    }
+    install::move_file(&appimage, &dest).map_err(|e| format!("couldn't move Outpost to {}: {e}", dest.display()))?;
+    *MOVED_TO.lock().unwrap_or_else(|e| e.into_inner()) = Some(dest.clone());
+    Ok(Some(dest))
 }
 
 /// Whether version `candidate` is newer than `current`, comparing the numbers in
@@ -64,15 +84,8 @@ pub fn move_home(paths: &Paths, appimage: &Path) -> Result<PathBuf, String> {
     if appimage == dest {
         return Ok(dest);
     }
-    fs::create_dir_all(&paths.applications)
-        .map_err(|e| format!("couldn't create {}: {e}", paths.applications.display()))?;
-    // A rename only works within one drive; otherwise copy, then remove the original.
-    if fs::rename(appimage, &dest).is_err() {
-        fs::copy(appimage, &dest).map_err(|e| format!("couldn't copy Outpost to {}: {e}", dest.display()))?;
-        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("couldn't make {} executable: {e}", dest.display()))?;
-        let _ = fs::remove_file(appimage);
-    }
+    settings::prepare_apps_folder(&paths.applications)?;
+    install::move_file(appimage, &dest).map_err(|e| format!("couldn't move Outpost to {}: {e}", dest.display()))?;
     Ok(dest)
 }
 

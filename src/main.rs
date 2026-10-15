@@ -6,6 +6,7 @@ mod index;
 mod install;
 mod paths;
 mod self_update;
+mod settings;
 mod state;
 mod ui;
 

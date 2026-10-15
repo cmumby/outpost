@@ -12,7 +12,8 @@ Usage:
   outpost                     Open the store
   outpost install <file|url>  Install an AppImage from a local file or a web link
   outpost list                List installed apps
-  outpost uninstall <id>      Remove an installed app";
+  outpost uninstall <id>      Remove an installed app
+  outpost --version           Show Outpost's version";
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let paths = Paths::new()?;
@@ -64,6 +65,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             println!("Uninstalled {}", app.name);
         }
         ["help" | "--help" | "-h"] => println!("{USAGE}"),
+        ["--version" | "-V" | "version"] => println!("Outpost {}", env!("CARGO_PKG_VERSION")),
         _ => return Err(format!("didn't understand that command\n\n{USAGE}")),
     }
     Ok(())

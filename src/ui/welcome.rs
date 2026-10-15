@@ -7,20 +7,16 @@ use adw::prelude::*;
 
 use super::Store;
 use crate::appimage;
-use crate::self_update;
+use crate::{self_update, settings};
 
 pub fn show_first_time(store: &Rc<Store>) {
-    let seen = store.paths.data.join("welcomed");
+    let seen = store.paths().data.join("welcomed");
     if seen.exists() {
         return;
     }
 
     let things = adw::PreferencesGroup::new();
-    things.add(&row(
-        "outpost-folder-symbolic",
-        "Apps go in your Applications folder",
-        "~/Applications, with launcher entries and icons added for you",
-    ));
+    things.add(&super::settings_page::apps_folder_row(store, "Apps will be installed in"));
     things.add(&row(
         "outpost-user-home-symbolic",
         "No admin password needed",
@@ -41,12 +37,12 @@ pub fn show_first_time(store: &Rc<Store>) {
     // Offer to move Outpost into ~/Applications if it's running from somewhere else,
     // such as Downloads.
     if let Some(appimage) = self_update::running_appimage()
-        && appimage != self_update::home(&store.paths)
+        && appimage != self_update::home(&store.paths())
     {
         let keep = row(
             "outpost-folder-download-symbolic",
-            "Keep Outpost in Applications",
-            "Moves it to ~/Applications/Outpost.AppImage, so it's easy to find and can update itself",
+            "Keep Outpost with your apps",
+            "Moves it into your apps folder, so it's easy to find and can update itself",
         );
         let move_button = gtk::Button::builder()
             .label("Move")
@@ -54,10 +50,10 @@ pub fn show_first_time(store: &Rc<Store>) {
             .build();
         keep.add_suffix(&move_button);
         let store = store.clone();
-        move_button.connect_clicked(move |_| match self_update::move_home(&store.paths, &appimage) {
+        move_button.connect_clicked(move |_| match self_update::move_home(&store.paths(), &appimage) {
             Ok(new_home) => {
-                let _ = fs::create_dir_all(&store.paths.data);
-                let _ = fs::write(store.paths.data.join("welcomed"), "");
+                let _ = fs::create_dir_all(&store.paths().data);
+                let _ = fs::write(store.paths().data.join("welcomed"), "");
                 super::restart_from(&store, &new_home);
             }
             Err(e) => store.alert("Couldn't Move Outpost", &e),
@@ -99,11 +95,17 @@ pub fn show_first_time(store: &Rc<Store>) {
         .build();
     {
         let dialog = dialog.clone();
-        start.connect_clicked(move |_| {
-            dialog.close();
+        let store = store.clone();
+        // Create the apps folder now, so problems with it show up here rather than
+        // on the first install.
+        start.connect_clicked(move |_| match settings::prepare_apps_folder(&store.paths().applications) {
+            Ok(()) => {
+                dialog.close();
+            }
+            Err(e) => store.alert("Choose Another Apps Folder", &e),
         });
     }
-    let data = store.paths.data.clone();
+    let data = store.paths().data.clone();
     dialog.connect_closed(move |_| {
         let _ = fs::create_dir_all(&data);
         let _ = fs::write(data.join("welcomed"), "");

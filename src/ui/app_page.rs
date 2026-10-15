@@ -5,7 +5,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use super::{Store, icons};
-use crate::index::App;
+use crate::index::{self, App};
 
 pub fn build(store: &Rc<Store>, app: &Rc<App>) -> adw::NavigationPage {
     let content = gtk::Box::builder()
@@ -72,7 +72,7 @@ pub fn build(store: &Rc<Store>, app: &Rc<App>) -> adw::NavigationPage {
 
 fn header(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
     let icon = gtk::Image::builder().pixel_size(128).build();
-    icons::show(&icon, app.icon_url.as_deref(), &store.paths.cache, || true);
+    icons::show(&icon, app.icon_url.as_deref(), &store.paths().cache, || true);
 
     let name = gtk::Label::builder()
         .label(app.name.as_str())
@@ -102,6 +102,9 @@ fn header(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
     text.append(&name);
     text.append(&summary);
     text.append(&meta);
+    if let Some(stats) = stats(app) {
+        text.append(&stats);
+    }
 
     let header = gtk::Box::builder().spacing(24).build();
     header.append(&icon);
@@ -178,7 +181,7 @@ fn screenshots(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
             .build();
         carousel.append(&picture);
         let (carousel, loaded, update, page) = (carousel.clone(), loaded.clone(), update.clone(), picture.clone());
-        icons::show_screenshot(&picture, url, &store.paths.cache, move |shown| {
+        icons::show_screenshot(&picture, url, &store.paths().cache, move |shown| {
             if shown {
                 loaded.set(loaded.get() + 1);
             } else {
@@ -188,6 +191,33 @@ fn screenshots(store: &Rc<Store>, app: &Rc<App>) -> gtk::Box {
         });
     }
     section
+}
+
+/// GitHub stars and downloads, e.g. "★ 47k stars · 12k downloads of this version".
+/// Exact numbers are in the tooltip.
+fn stats(app: &App) -> Option<gtk::Label> {
+    let mut parts = Vec::new();
+    let mut exact = Vec::new();
+    if app.stars > 0 {
+        parts.push(format!("★ {} stars", index::short_count(app.stars)));
+        exact.push(format!("{} stars on GitHub", app.stars));
+    }
+    if let Some(downloads) = app.downloads.filter(|&d| d > 0) {
+        parts.push(format!("{} downloads of this version", index::short_count(downloads)));
+        exact.push(format!("{downloads} downloads of version {} from GitHub", app.latest_version));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(
+        gtk::Label::builder()
+            .label(parts.join(" · "))
+            .tooltip_text(exact.join("\n"))
+            .wrap(true)
+            .xalign(0.0)
+            .css_classes(["caption", "dim-label"])
+            .build(),
+    )
 }
 
 fn details(store: &Rc<Store>, app: &Rc<App>) -> adw::PreferencesGroup {

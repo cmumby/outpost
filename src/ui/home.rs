@@ -90,7 +90,7 @@ fn app_row(store: &Rc<Store>, app: &Rc<App>) -> adw::ActionRow {
         .activatable(true)
         .build();
     let icon = gtk::Image::builder().pixel_size(48).build();
-    icons::show(&icon, app.icon_url.as_deref(), &store.paths.cache, || true);
+    icons::show(&icon, app.icon_url.as_deref(), &store.paths().cache, || true);
     row.add_prefix(&icon);
     row.add_suffix(&gtk::Image::from_icon_name("outpost-go-next-symbolic"));
     let store = store.clone();

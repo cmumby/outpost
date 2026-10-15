@@ -28,7 +28,7 @@ pub fn build(store: &Rc<Store>) -> (gtk::ScrolledWindow, gio::ListStore) {
             summary.set_label(&app.summary);
 
             let item = item.downgrade();
-            icons::show(&icon, app.icon_url.as_deref(), &store.paths.cache, move || {
+            icons::show(&icon, app.icon_url.as_deref(), &store.paths().cache, move || {
                 item.upgrade().and_then(|item| item.item()).as_ref() == Some(object.upcast_ref())
             });
         });

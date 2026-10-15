@@ -56,6 +56,10 @@ pub struct App {
     /// The source repo's GitHub stars.
     #[serde(default)]
     pub stars: u64,
+    /// GitHub downloads of the latest version's AppImages, by anyone. `None` in
+    /// catalogues from before this was collected.
+    #[serde(default)]
+    pub downloads: Option<u64>,
     /// Keyed by architecture, e.g. `x86_64`.
     pub assets: HashMap<String, Asset>,
 }
@@ -165,6 +169,16 @@ pub fn in_category(app: &App, key: &str) -> bool {
     })
 }
 
+/// A count in a few characters: 950, 12.4k, 1.2M.
+pub fn short_count(count: u64) -> String {
+    match count {
+        0..1_000 => count.to_string(),
+        1_000..10_000 => format!("{:.1}k", count as f64 / 1_000.0).replace(".0k", "k"),
+        10_000..1_000_000 => format!("{}k", count / 1_000),
+        _ => format!("{:.1}M", count as f64 / 1_000_000.0).replace(".0M", "M"),
+    }
+}
+
 /// Apps with the newest releases first. AppImageHub's open listing is only included
 /// once an app has some following (`MIN_STARS`), so New & Updated isn't swamped by
 /// every small project that happened to release today.
@@ -236,6 +250,7 @@ mod tests {
             latest_version: "1.0".into(),
             released_at: None,
             stars: 0,
+            downloads: None,
             assets: HashMap::new(),
         })
     }
@@ -271,6 +286,16 @@ mod tests {
         // The newest release is from an AppImageHub app with few stars, so it's left out.
         assert_eq!(names(newest(&apps)), ["Followed", "Known"]);
         assert_eq!(names(popular(&apps)), ["Known", "Followed", "Quiet"]);
+    }
+
+    #[test]
+    fn shortens_counts() {
+        assert_eq!(short_count(950), "950");
+        assert_eq!(short_count(1_000), "1k");
+        assert_eq!(short_count(1_250), "1.2k");
+        assert_eq!(short_count(12_400), "12k");
+        assert_eq!(short_count(93_998), "93k");
+        assert_eq!(short_count(1_250_000), "1.2M");
     }
 
     #[test]

@@ -63,7 +63,7 @@ impl Store {
         let store = self.clone();
         let app = app.clone();
         glib::spawn_future_local(async move {
-            let paths = store.paths.clone();
+            let paths = store.paths();
             let (id, version) = (app.id.clone(), app.latest_version.clone());
             let result = gio::spawn_blocking(move || {
                 let entry = StoreEntry { id: &id, version: &version, sha256: asset.sha256.as_deref() };
@@ -99,7 +99,7 @@ impl Store {
         let store = self.clone();
         let installed = installed.clone();
         dialog.connect_response(Some("uninstall"), move |_, _| {
-            match install::uninstall(&store.paths, &installed.id) {
+            match install::uninstall(&store.paths(), &installed.id) {
                 Ok(app) => store.toast(&format!("{} was uninstalled", app.name)),
                 Err(e) => store.alert(&format!("Couldn't Uninstall {}", installed.name), &capitalize(&e)),
             }

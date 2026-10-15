@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::appimage::{self, AppImageType};
-use crate::{desktop, download};
+use crate::{desktop, download, settings};
 use crate::paths::Paths;
 use crate::state::{InstalledApp, InstalledState};
 
@@ -72,7 +72,11 @@ fn install_with(
     entry: Option<StoreEntry>,
     fetch: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<InstalledApp, String> {
-    for dir in [&paths.applications, &paths.desktop_entries, &paths.data, &paths.cache] {
+    // The apps folder can be anywhere the user chose, so check it still works (a
+    // drive may have been unplugged, say) before downloading anything.
+    settings::prepare_apps_folder(&paths.applications)
+        .map_err(|e| format!("{e} You can choose a different apps folder in Outpost's Settings."))?;
+    for dir in [&paths.desktop_entries, &paths.data, &paths.cache] {
         fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
 
@@ -176,6 +180,58 @@ pub fn uninstall(paths: &Paths, id: &str) -> Result<InstalledApp, String> {
     refresh_launcher(paths);
     state.save(&paths.installed_json())?;
     Ok(app)
+}
+
+/// Moves every installed app into `folder` (after the apps folder setting changes),
+/// pointing their launcher entries at the new location. Apps moved before an error
+/// stay moved. Returns how many apps moved.
+pub fn move_apps(paths: &Paths, folder: &Path) -> Result<usize, String> {
+    settings::prepare_apps_folder(folder)?;
+    let _lock = lock_state();
+    let mut state = InstalledState::load(&paths.installed_json())?;
+    let mut moved = 0;
+    let mut result = Ok(());
+    for app in &mut state.apps {
+        let Some(name) = app.appimage_path.file_name() else { continue };
+        let dest = folder.join(name);
+        if app.appimage_path == dest || !app.appimage_path.exists() {
+            continue;
+        }
+        if dest.exists() {
+            result = Err(format!("couldn't move {}: {} already exists", app.name, dest.display()));
+            break;
+        }
+        if let Err(e) = move_file(&app.appimage_path, &dest) {
+            result = Err(format!("couldn't move {}: {e}", app.name));
+            break;
+        }
+        if let Ok(entry) = fs::read_to_string(&app.desktop_path) {
+            let icon = desktop::get(&entry, "Icon").unwrap_or_default();
+            let wm_class = desktop::get(&entry, "StartupWMClass").unwrap_or_default();
+            let _ = fs::write(&app.desktop_path, desktop::rewrite(&entry, &dest, &icon, &app.id, &wm_class));
+        }
+        app.appimage_path = dest;
+        moved += 1;
+    }
+    state.save(&paths.installed_json())?;
+    refresh_launcher(paths);
+    result.map(|()| moved)
+}
+
+/// Moves a file, copying and deleting when it's going to another drive (where a
+/// plain rename doesn't work).
+pub fn move_file(from: &Path, to: &Path) -> Result<(), String> {
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to)
+        .and_then(|_| fs::set_permissions(to, fs::Permissions::from_mode(0o755)))
+        .map_err(|e| {
+            let _ = fs::remove_file(to);
+            e.to_string()
+        })?;
+    let _ = fs::remove_file(from);
+    Ok(())
 }
 
 pub fn list(paths: &Paths) -> Result<Vec<InstalledApp>, String> {
@@ -406,6 +462,52 @@ mod tests {
         let app = install_from_url(&paths, url, Some(entry), |_, _| {}).unwrap();
         assert_eq!(app.index_id.as_deref(), Some("localsend"));
         assert_eq!(app.version.as_deref(), Some("1.18.2"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn moves_installed_apps_and_their_launcher_entries() {
+        let dir = std::env::temp_dir().join(format!("outpost-test-move-apps-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = Paths {
+            applications: dir.join("old"),
+            desktop_entries: dir.join("entries"),
+            icons: dir.join("icons"),
+            data: dir.join("data"),
+            cache: dir.join("cache"),
+        };
+        for d in [&paths.applications, &paths.desktop_entries, &paths.data] {
+            fs::create_dir_all(d).unwrap();
+        }
+        let old_path = paths.applications.join("demo.AppImage");
+        fs::write(&old_path, "appimage").unwrap();
+        let desktop_path = paths.desktop_entries.join("outpost-demo.desktop");
+        let entry = desktop::rewrite("[Desktop Entry]\nExec=demo %U\nIcon=demo\n", &old_path, "outpost-demo", "demo", "demo");
+        fs::write(&desktop_path, entry).unwrap();
+        let state = InstalledState {
+            schema_version: 1,
+            apps: vec![InstalledApp {
+                id: "demo".into(),
+                name: "Demo".into(),
+                version: None,
+                appimage_path: old_path.clone(),
+                desktop_path: desktop_path.clone(),
+                icon_path: None,
+                installed_at: 0,
+                source: String::new(),
+                index_id: None,
+            }],
+        };
+        state.save(&paths.installed_json()).unwrap();
+
+        let new_folder = dir.join("new");
+        assert_eq!(move_apps(&paths, &new_folder).unwrap(), 1);
+        let new_path = new_folder.join("demo.AppImage");
+        assert!(new_path.exists() && !old_path.exists());
+        let entry = fs::read_to_string(&desktop_path).unwrap();
+        assert!(entry.contains(&format!("Exec=\"{}\" %U", new_path.display())), "{entry}");
+        assert!(entry.contains("Icon=outpost-demo"), "{entry}");
+        assert_eq!(list(&paths).unwrap()[0].appimage_path, new_path);
         let _ = fs::remove_dir_all(dir);
     }
 

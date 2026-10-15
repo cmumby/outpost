@@ -6,6 +6,7 @@ mod app_page;
 mod home;
 mod icons;
 mod installed_page;
+mod settings_page;
 mod welcome;
 
 use std::cell::RefCell;
@@ -37,7 +38,8 @@ pub enum Change {
 
 /// Everything the store's pages share.
 pub struct Store {
-    pub paths: Paths,
+    /// Changes when the user picks a new apps folder; read it with `paths()`.
+    paths: RefCell<Paths>,
     pub window: adw::ApplicationWindow,
     pub nav: adw::NavigationView,
     toasts: adw::ToastOverlay,
@@ -55,6 +57,15 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn paths(&self) -> Paths {
+        self.paths.borrow().clone()
+    }
+
+    /// Switches installs to a different apps folder, after the user picked one.
+    pub fn set_apps_folder(&self, folder: std::path::PathBuf) {
+        self.paths.borrow_mut().applications = folder;
+    }
+
     pub fn apps(&self) -> Rc<Vec<Rc<App>>> {
         self.apps.borrow().clone()
     }
@@ -135,7 +146,7 @@ impl Store {
 
     /// Re-reads installed.json and tells every page.
     pub fn reload_installed(&self) {
-        *self.installed.borrow_mut() = install::list(&self.paths).unwrap_or_default();
+        *self.installed.borrow_mut() = install::list(&self.paths()).unwrap_or_default();
         self.notify(Change::Installed);
     }
 
@@ -183,7 +194,7 @@ pub fn build_window(application: &adw::Application) {
     window.set_content(Some(&toasts));
 
     let store = Rc::new(Store {
-        paths,
+        paths: RefCell::new(paths),
         window: window.clone(),
         nav: nav.clone(),
         toasts,
@@ -198,6 +209,9 @@ pub fn build_window(application: &adw::Application) {
     nav.add(&main_page(&store));
     store.reload_installed();
     window.present();
+    add_menu_actions(application, &store);
+    // If the apps folder was changed in settings.json by hand, bring the apps along.
+    settings_page::gather_apps(&store, None);
     welcome::show_first_time(&store);
 }
 
@@ -248,6 +262,17 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
 
     let header = adw::HeaderBar::new();
     header.pack_start(&search_button);
+    let menu = gio::Menu::new();
+    menu.append(Some("Settings"), Some("app.settings"));
+    menu.append(Some("About Outpost"), Some("app.about"));
+    header.pack_end(
+        &gtk::MenuButton::builder()
+            .icon_name("outpost-open-menu-symbolic")
+            .tooltip_text("Main Menu")
+            .menu_model(&menu)
+            .primary(true)
+            .build(),
+    );
     header.set_title_widget(Some(
         &adw::ViewSwitcher::builder()
             .stack(&stack)
@@ -342,7 +367,7 @@ fn main_page(store: &Rc<Store>) -> adw::NavigationPage {
             let error_page = error_page.clone();
             let update_banner = update_banner.clone();
             glib::spawn_future_local(async move {
-                let paths = store.paths.clone();
+                let paths = store.paths();
                 let result = gio::spawn_blocking(move || index::fetch(&paths))
                     .await
                     .unwrap_or_else(|_| Err("Loading the catalogue crashed.".into()));
@@ -471,11 +496,32 @@ pub fn restart_from(store: &Store, appimage: &std::path::Path) {
     }
 }
 
+/// The header menu's Settings (Ctrl+,) and About Outpost.
+fn add_menu_actions(application: &adw::Application, store: &Rc<Store>) {
+    let settings = gio::SimpleAction::new("settings", None);
+    let weak = Rc::downgrade(store);
+    settings.connect_activate(move |_, _| {
+        if let Some(store) = weak.upgrade() {
+            settings_page::show(&store);
+        }
+    });
+    let about = gio::SimpleAction::new("about", None);
+    let weak = Rc::downgrade(store);
+    about.connect_activate(move |_, _| {
+        if let Some(store) = weak.upgrade() {
+            settings_page::show_about(&store);
+        }
+    });
+    application.add_action(&settings);
+    application.add_action(&about);
+    application.set_accels_for_action("app.settings", &["<Control>comma"]);
+}
+
 /// Offers to move Outpost into ~/Applications when it's running from somewhere else,
 /// such as Downloads. (The welcome screen offers this too, but can be skipped.)
 fn move_home_banner(store: &Rc<Store>) -> Option<adw::Banner> {
     let appimage = self_update::running_appimage()?;
-    if appimage == self_update::home(&store.paths) {
+    if appimage == self_update::home(&store.paths()) {
         return None;
     }
     let folder = appimage
@@ -484,13 +530,16 @@ fn move_home_banner(store: &Rc<Store>) -> Option<adw::Banner> {
         .map_or_else(|| "another folder".to_string(), |name| name.to_string_lossy().into_owned());
     let banner = adw::Banner::builder()
         .title(format!("Outpost is running from {folder}"))
-        .button_label("Move to Applications")
+        .button_label(format!(
+            "Move to {}",
+            settings_page::friendly_path(&store.paths().applications)
+        ))
         .revealed(true)
         .build();
     let store = Rc::downgrade(store);
     banner.connect_button_clicked(move |_| {
         let Some(store) = store.upgrade() else { return };
-        match self_update::move_home(&store.paths, &appimage) {
+        match self_update::move_home(&store.paths(), &appimage) {
             Ok(new_home) => restart_from(&store, &new_home),
             Err(e) => store.alert("Couldn't Move Outpost", &e),
         }
@@ -540,7 +589,7 @@ fn add_interface_icons() {
 /// Adds Outpost itself to the launcher, with its icon. GNOME only shows an app's
 /// notifications if it has a launcher entry, and this also makes Outpost easy to
 /// find again.
-fn register_desktop_entry(paths: &Paths) {
+pub(super) fn register_desktop_entry(paths: &Paths) {
     let icons = [
         (paths.icons.join(format!("scalable/apps/{}.svg", crate::APP_ID)), ICON),
         (paths.icons.join(format!("symbolic/apps/{}-symbolic.svg", crate::APP_ID)), SYMBOLIC_ICON),
@@ -555,10 +604,8 @@ fn register_desktop_entry(paths: &Paths) {
         }
     }
 
-    // Inside an AppImage, the running file is a temporary mount; $APPIMAGE is the real one.
-    let Some(program) = std::env::var_os("APPIMAGE")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::current_exe().ok())
+    // Inside an AppImage, the running file is a temporary mount; use the AppImage file.
+    let Some(program) = self_update::running_appimage().or_else(|| std::env::current_exe().ok())
     else {
         return;
     };
