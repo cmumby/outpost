@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.3.2) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.4.0) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -111,13 +111,13 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
 
 ## Next steps
 
-1. Check on the CachyOS/KDE machine that v0.3.0 opens apps and shows its icons.
+1. Look into GNOME's Open Desktop Ratings Service (ODRS) for ratings and reviews:
+   its terms for other app stores, its API, and how many of our apps it covers.
 2. Decide what Featured should be: dropped, automatic (weekly rotating picks of
    verified apps), or manual as now (`featured = true`).
-3. Read names, categories and screenshots from inside each AppImage (step 3 of
-   the automation plan), so followed apps get categories and correct names.
-4. Find a usable screenshot for LocalSend. Its official ones are WebP, which GTK
-   can't always open.
+3. Read names, categories and screenshots from inside each AppImage, so followed
+   apps get categories and correctly capitalized names.
+4. Find a usable screenshot for LocalSend (its official ones are WebP).
 
 ## Testing notes
 
@@ -178,3 +178,20 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   "undefined symbol" errors against the bundled GLib on Ubuntu 26.04.
 - Debugging tip: `G_MESSAGES_DEBUG=all ~/Applications/Outpost.AppImage` prints
   GTK's reasons for icons failing to load.
+
+### v0.4.0: apps folder, Settings, About, stars and downloads
+- One apps folder for all apps: `~/Applications` by default, chosen on the welcome
+  screen and changeable in Settings (saved in `~/.config/outpost/settings.json`).
+  Folders are created if missing and checked before use: Outpost must be able to
+  write there, and programs must be able to run there (not read-only, not mounted
+  `noexec`, not a drive that can't mark files executable).
+- Changing the folder moves every installed AppImage there, and Outpost itself if
+  it lived in the old folder, updating launcher entries. Apps outside the folder
+  are also gathered at startup, so a hand-edited settings.json works too.
+- Header menu with Settings (Ctrl+,) and About Outpost. The version shows in both,
+  and `outpost --version` prints it.
+- App pages show GitHub stars and downloads of the latest version; the index now
+  carries `downloads` for every app.
+- A GitHub Pages publish timed out once. Re-running the failed run doesn't work
+  (it finds two uploaded copies of the site); start a fresh run instead
+  (`gh workflow run build-index.yml --repo cmumby/outpost-index`).
