@@ -141,10 +141,16 @@ fn update_row(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) -> adw
             app.latest_version
         ))
         .use_markup(false)
+        .activatable(true)
+        .tooltip_text("See what's new")
         .build();
     let icon = gtk::Image::builder().pixel_size(48).build();
     icons::show_file(&icon, installed.icon_path.as_deref());
     row.add_prefix(&icon);
+    {
+        let (store, installed, app) = (store.clone(), installed.clone(), app.clone());
+        row.connect_activated(move |_| super::whats_new::show(&store, &installed, &app));
+    }
 
     let update = gtk::Button::builder()
         .label(if store.progress(app).is_some() { "Updating…" } else { "Update" })

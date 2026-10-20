@@ -5,9 +5,11 @@ mod app_list;
 mod app_page;
 mod home;
 mod icons;
+mod markdown;
 mod installed_page;
 mod settings_page;
 mod welcome;
+mod whats_new;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

@@ -60,6 +60,12 @@ pub struct App {
     /// catalogues from before this was collected.
     #[serde(default)]
     pub downloads: Option<u64>,
+    /// The latest release's GitHub page.
+    #[serde(default)]
+    pub release_url: Option<String>,
+    /// Whether notes/<id>.md has the latest release's notes.
+    #[serde(default)]
+    pub has_release_notes: bool,
     /// Keyed by architecture, e.g. `x86_64`.
     pub assets: HashMap<String, Asset>,
 }
@@ -125,6 +131,23 @@ pub fn fetch(paths: &Paths) -> Result<Index, String> {
         }
     }
     Ok(index)
+}
+
+/// Where an app's release notes are published, next to index.json.
+pub fn release_notes_url(app: &App) -> Option<String> {
+    let base = INDEX_URL.rsplit_once('/')?.0;
+    app.has_release_notes.then(|| format!("{base}/notes/{}.md", app.id))
+}
+
+/// A small text file from the web, or `None` if it couldn't be fetched.
+pub fn fetch_text(url: &str) -> Option<String> {
+    download::client()
+        .get(url)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.text())
+        .ok()
 }
 
 /// Falls back to the last downloaded index. `why` explains why we couldn't get a new one.
@@ -251,6 +274,8 @@ mod tests {
             released_at: None,
             stars: 0,
             downloads: None,
+            release_url: None,
+            has_release_notes: false,
             assets: HashMap::new(),
         })
     }
