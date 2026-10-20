@@ -122,12 +122,17 @@ fn app_row(store: &Rc<Store>, app: &InstalledApp) -> adw::ActionRow {
     let (store_, app_) = (store.clone(), app.clone());
     uninstall.connect_clicked(move |_| store_.uninstall(&app_));
 
-    // Apps from the store link to their store page.
-    if let Some(listing) = store.listing_for(app) {
-        row.set_activatable(true);
-        row.add_suffix(&gtk::Image::from_icon_name("outpost-go-next-symbolic"));
-        let store = store.clone();
-        row.connect_activated(move |_| store.show_app(&listing));
+    // Apps from the store link to their store page. Others keep an invisible arrow,
+    // so every row's buttons line up.
+    let arrow = gtk::Image::from_icon_name("outpost-go-next-symbolic");
+    row.add_suffix(&arrow);
+    match store.listing_for(app) {
+        Some(listing) => {
+            row.set_activatable(true);
+            let store = store.clone();
+            row.connect_activated(move |_| store.show_app(&listing));
+        }
+        None => arrow.set_opacity(0.0),
     }
     row
 }
