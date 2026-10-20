@@ -63,8 +63,10 @@ pub struct App {
     /// The latest release's GitHub page.
     #[serde(default)]
     pub release_url: Option<String>,
-    /// Whether notes/<id>.md has the latest release's notes.
+    /// Whether notes/<id>.md has the latest release's notes. (Outpost tries the file
+    /// either way; see `release_notes_url`.)
     #[serde(default)]
+    #[allow(dead_code)]
     pub has_release_notes: bool,
     /// Keyed by architecture, e.g. `x86_64`.
     pub assets: HashMap<String, Asset>,
@@ -133,10 +135,12 @@ pub fn fetch(paths: &Paths) -> Result<Index, String> {
     Ok(index)
 }
 
-/// Where an app's release notes are published, next to index.json.
+/// Where an app's release notes are published, next to index.json. Always worth
+/// trying: a catalogue saved before the notes were published doesn't know about
+/// them, and a missing file just means there are no notes.
 pub fn release_notes_url(app: &App) -> Option<String> {
     let base = INDEX_URL.rsplit_once('/')?.0;
-    app.has_release_notes.then(|| format!("{base}/notes/{}.md", app.id))
+    Some(format!("{base}/notes/{}.md", app.id))
 }
 
 /// A small text file from the web, or `None` if it couldn't be fetched.
