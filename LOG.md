@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.4.0) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.5.0) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -195,3 +195,14 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
 - A GitHub Pages publish timed out once. Re-running the failed run doesn't work
   (it finds two uploaded copies of the site); start a fresh run instead
   (`gh workflow run build-index.yml --repo cmumby/outpost-index`).
+
+### v0.5.0: What's New for updates
+- Clicking an app under Updates on the Installed tab opens "What's New in
+  <app> <version>": the latest release's notes, Update, and View on GitHub.
+- The index publishes each app's latest release notes as `notes/<id>.md` next
+  to `index.json` (kept out of the catalogue so it stays small; Outpost fetches
+  them only when opened). Notes over 20,000 characters are cut short.
+- A small Markdown reader lays notes out as headings, spaced bullet points,
+  paragraphs and code. GitHub's generated "by @someone in <link>" credits are
+  dimmed, and pull request and compare links shortened (#7155, v1.0...v1.1).
+- Outpost tries the notes file even if its saved catalogue predates the notes.

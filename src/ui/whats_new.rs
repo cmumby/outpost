@@ -11,11 +11,9 @@ use crate::index::{self, App};
 use crate::state::InstalledApp;
 
 pub fn show(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) {
-    let notes = gtk::Label::builder()
-        .wrap(true)
-        .xalign(0.0)
-        .yalign(0.0)
-        .selectable(true)
+    let notes = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(10)
         .build();
     let spinner = gtk::Spinner::builder()
         .spinning(true)
@@ -66,8 +64,6 @@ pub fn show(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) {
 
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
-        .max_content_height(480)
         .vexpand(true)
         .child(&content)
         .build();
@@ -84,7 +80,10 @@ pub fn show(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) {
 
     let dialog = adw::Dialog::builder()
         .title(format!("What's New in {} {}", app.name, app.latest_version))
-        .content_width(560)
+        // Release notes are often long, so give them room. On a smaller window the
+        // dialog shrinks to fit.
+        .content_width(820)
+        .content_height(720)
         .child(&toolbar)
         .build();
 
@@ -110,16 +109,74 @@ pub fn show(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) {
             Some(url) => gio::spawn_blocking(move || index::fetch_text(&url)).await.ok().flatten(),
             None => None,
         };
-        let markup = text.map(|text| markdown::to_pango(&text)).filter(|markup| !markup.is_empty());
-        match markup {
-            Some(markup) => notes.set_markup(&markup),
-            None => {
-                notes.add_css_class("dim-label");
-                notes.set_text("The developer didn't publish notes for this version. There may be more on its GitHub page.");
-            }
+        let blocks = text.map(|text| markdown::blocks(&text)).unwrap_or_default();
+        if blocks.is_empty() {
+            let none = text_label("The developer didn't publish notes for this version. There may be more on its GitHub page.");
+            none.add_css_class("dim-label");
+            notes.append(&none);
+        }
+        for (i, block) in blocks.into_iter().enumerate() {
+            notes.append(&block_widget(block, i == 0));
         }
         body.set_visible_child_name("notes");
     });
 
     dialog.present(Some(&store.window));
+}
+
+/// One block of release notes, laid out with room around it.
+fn block_widget(block: markdown::Block, first: bool) -> gtk::Widget {
+    match block {
+        markdown::Block::Heading(markup) => {
+            let label = text_label(&markup);
+            label.add_css_class("heading");
+            // Space above each heading, apart from one that starts the notes.
+            label.set_margin_top(if first { 0 } else { 14 });
+            label.upcast()
+        }
+        markdown::Block::Item(depth, markup) => {
+            // A hanging indent: wrapped lines line up under the text, not the bullet.
+            let row = gtk::Box::builder()
+                .spacing(10)
+                .margin_start(6 + 22 * depth as i32)
+                .build();
+            row.append(
+                &gtk::Label::builder()
+                    .label(if depth == 0 { "•" } else { "◦" })
+                    .yalign(0.0)
+                    .css_classes(["dim-label"])
+                    .build(),
+            );
+            let text = text_label(&markup);
+            text.set_hexpand(true);
+            row.append(&text);
+            row.upcast()
+        }
+        markdown::Block::Paragraph(markup) => {
+            let label = text_label(&markup);
+            label.set_margin_top(if first { 0 } else { 4 });
+            label.upcast()
+        }
+        markdown::Block::Code(markup) => {
+            let label = text_label(&markup);
+            label.add_css_class("monospace");
+            let frame = gtk::Frame::builder().child(&label).css_classes(["view"]).build();
+            label.set_margin_top(8);
+            label.set_margin_bottom(8);
+            label.set_margin_start(10);
+            label.set_margin_end(10);
+            frame.upcast()
+        }
+    }
+}
+
+fn text_label(markup: &str) -> gtk::Label {
+    let label = gtk::Label::builder()
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .xalign(0.0)
+        .selectable(true)
+        .build();
+    label.set_markup(markup);
+    label
 }
