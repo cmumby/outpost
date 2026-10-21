@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.5.0) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.5.1) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -206,3 +206,13 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   paragraphs and code. GitHub's generated "by @someone in <link>" credits are
   dimmed, and pull request and compare links shortened (#7155, v1.0...v1.1).
 - Outpost tries the notes file even if its saved catalogue predates the notes.
+
+### v0.5.1: Fixes
+- What's New no longer freezes the AppImage for seconds while it lays out long
+  notes. The GTK 4.14 bundled in the AppImage re-measured every line inside a
+  `gtk::Stack`; a plain box fixed it (3.6 s to about 0.2 s). Running from source
+  uses the system's newer GTK, so the slowness showed only in the AppImage. When
+  testing from source, quit every running Outpost first: a second copy just
+  brings up the one already open.
+- Installed rows without a store page keep their Open button lined up with the
+  others.
