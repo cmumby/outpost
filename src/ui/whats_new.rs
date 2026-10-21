@@ -22,9 +22,12 @@ pub fn show(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) {
         .halign(gtk::Align::Center)
         .margin_top(24)
         .build();
-    let body = gtk::Stack::builder().vhomogeneous(false).build();
-    body.add_named(&spinner, Some("loading"));
-    body.add_named(&notes, Some("notes"));
+    // A plain box, not a gtk::Stack: the GTK 4.14 bundled in the AppImage measures
+    // every line of long notes over and over inside a Stack, freezing the window
+    // for seconds.
+    let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    body.append(&spinner);
+    body.append(&notes);
 
     let version = gtk::Label::builder()
         .label(format!(
@@ -118,7 +121,7 @@ pub fn show(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) {
         for (i, block) in blocks.into_iter().enumerate() {
             notes.append(&block_widget(block, i == 0));
         }
-        body.set_visible_child_name("notes");
+        spinner.set_visible(false);
     });
 
     dialog.present(Some(&store.window));
