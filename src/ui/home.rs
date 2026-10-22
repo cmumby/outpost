@@ -1,10 +1,11 @@
-//! The Explore tab's front page: Featured, New & Updated, Popular, then categories.
+//! The Explore tab's front page: the Featured slideshow, New & Updated, Popular,
+//! then categories.
 
 use std::rc::Rc;
 
 use adw::prelude::*;
 
-use super::{Store, app_list, icons};
+use super::{Store, app_list, featured, icons};
 use crate::index::{self, App};
 
 pub fn build(store: &Rc<Store>) -> gtk::ScrolledWindow {
@@ -18,17 +19,7 @@ pub fn build(store: &Rc<Store>) -> gtk::ScrolledWindow {
         .margin_end(12)
         .build();
 
-    let featured: Vec<_> = apps.iter().filter(|app| app.featured).cloned().collect();
-    if !featured.is_empty() {
-        let group = adw::PreferencesGroup::builder()
-            .title("Featured")
-            .description("Hand-picked apps we've checked come from their official source")
-            .build();
-        for app in &featured {
-            group.add(&app_row(store, app));
-        }
-        content.append(&group);
-    }
+    content.append(&featured::build(store));
     content.append(&section(store, "New & Updated", index::newest(&apps)));
     content.append(&section(store, "Popular", index::popular(&apps)));
 

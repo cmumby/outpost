@@ -25,21 +25,28 @@ thread_local! {
 pub fn show(image: &gtk::Image, url: Option<&str>, cache: &Path, still_wanted: impl Fn() -> bool + 'static) {
     image.set_icon_name(Some(PLACEHOLDER));
     let Some(url) = url else { return };
-    if let Some(texture) = LOADED.with_borrow(|loaded| loaded.get(url).cloned()) {
-        image.set_paintable(Some(&texture));
-        return;
-    }
     let image = image.downgrade();
-    let remember = url.to_string();
-    load(url, &cache.join("icons"), move |texture| {
-        // A missing icon just stays as the placeholder.
-        let Some(texture) = texture else { return };
-        LOADED.with_borrow_mut(|loaded| loaded.insert(remember, texture.clone()));
+    with_icon(url, cache, move |texture| {
         if let Some(image) = image.upgrade()
             && still_wanted()
         {
-            image.set_paintable(Some(&texture));
+            image.set_paintable(Some(texture));
         }
+    });
+}
+
+/// Hands the icon at `url` to `use_icon` once it's loaded. A missing icon never
+/// arrives, so whatever was showing stays.
+pub fn with_icon(url: &str, cache: &Path, use_icon: impl FnOnce(&gdk::Texture) + 'static) {
+    if let Some(texture) = LOADED.with_borrow(|loaded| loaded.get(url).cloned()) {
+        use_icon(&texture);
+        return;
+    }
+    let remember = url.to_string();
+    load(url, &cache.join("icons"), move |texture| {
+        let Some(texture) = texture else { return };
+        LOADED.with_borrow_mut(|loaded| loaded.insert(remember, texture.clone()));
+        use_icon(&texture);
     });
 }
 

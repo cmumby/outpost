@@ -228,6 +228,52 @@ pub fn popular(apps: &[Rc<App>]) -> Vec<Rc<App>> {
 
 const MIN_STARS: u64 = 100;
 
+/// Why an app is in the Featured slideshow.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Pick {
+    Featured,
+    Popular,
+    New,
+}
+
+/// The Featured slideshow: every hand-picked app first, then the slots left split
+/// between Popular and New & Updated (Popular gets the odd one), taking turns. If
+/// one list runs out, the other fills in. Slides are built around the app's icon,
+/// so those picks need one.
+pub fn recommendations(apps: &[Rc<App>], count: usize) -> Vec<(Rc<App>, Pick)> {
+    let featured: Vec<_> = apps.iter().filter(|app| app.featured).take(count).cloned().collect();
+    let open = count - featured.len();
+
+    let mut taken = featured.clone();
+    let mut fill = |list: &[Rc<App>], wanted: usize| -> Vec<Rc<App>> {
+        let picked: Vec<_> = list
+            .iter()
+            .filter(|app| app.icon_url.is_some() && !taken.iter().any(|t| Rc::ptr_eq(t, app)))
+            .take(wanted)
+            .cloned()
+            .collect();
+        taken.extend(picked.iter().cloned());
+        picked
+    };
+    let (popular_list, new_list) = (popular(apps), newest(apps));
+    let mut popular = fill(&popular_list, open.div_ceil(2));
+    let mut new = fill(&new_list, open / 2);
+    new.extend(fill(&new_list, open - popular.len() - new.len()));
+    popular.extend(fill(&popular_list, open - popular.len() - new.len()));
+
+    let mut picks: Vec<_> = featured.into_iter().map(|app| (app, Pick::Featured)).collect();
+    let (mut popular, mut new) = (popular.into_iter(), new.into_iter());
+    loop {
+        let (p, n) = (popular.next(), new.next());
+        if p.is_none() && n.is_none() {
+            break;
+        }
+        picks.extend(p.map(|app| (app, Pick::Popular)));
+        picks.extend(n.map(|app| (app, Pick::New)));
+    }
+    picks
+}
+
 /// Apps matching `query`, best matches first: names before summaries, and curated
 /// apps before others.
 pub fn search(apps: &[Rc<App>], query: &str) -> Vec<Rc<App>> {
@@ -315,6 +361,60 @@ mod tests {
         // The newest release is from an AppImageHub app with few stars, so it's left out.
         assert_eq!(names(newest(&apps)), ["Followed", "Known"]);
         assert_eq!(names(popular(&apps)), ["Known", "Followed", "Quiet"]);
+    }
+
+    /// An app with an icon, `stars` stars, released on day `day` of October.
+    fn listed(name: &str, stars: u64, day: u32, featured: bool) -> Rc<App> {
+        let mut app = app(name, "", "curated", &[]);
+        let edit = Rc::get_mut(&mut app).unwrap();
+        edit.icon_url = Some("https://example.com/icon.png".into());
+        edit.stars = stars;
+        edit.released_at = Some(format!("2026-10-{day:02}T00:00:00Z"));
+        edit.featured = featured;
+        app
+    }
+
+    fn picks(apps: &[Rc<App>], count: usize) -> Vec<(String, Pick)> {
+        recommendations(apps, count).into_iter().map(|(app, pick)| (app.name.clone(), pick)).collect()
+    }
+
+    #[test]
+    fn slideshow_fills_up_after_featured_apps() {
+        let apps = [
+            listed("Photocraft", 10, 1, true),
+            listed("Big", 900, 2, false),
+            listed("Bigger", 1000, 3, false),
+            listed("Fresh", 1, 20, false),
+            listed("Fresher", 2, 21, false),
+            listed("Middling", 50, 4, false),
+        ];
+        use Pick::*;
+        // One featured, then two popular and two new, taking turns.
+        assert_eq!(
+            picks(&apps, 5),
+            [
+                ("Photocraft".into(), Featured),
+                ("Bigger".into(), Popular),
+                ("Fresher".into(), New),
+                ("Big".into(), Popular),
+                ("Fresh".into(), New),
+            ]
+        );
+        // Popular gets the odd slot.
+        assert_eq!(picks(&apps, 4).iter().filter(|(_, pick)| *pick == Popular).count(), 2);
+        // Featured apps always come first, even if there's only room for them.
+        assert_eq!(picks(&apps, 1), [("Photocraft".into(), Featured)]);
+    }
+
+    #[test]
+    fn slideshow_never_repeats_an_app_and_skips_apps_without_icons() {
+        let mut no_icon = listed("NoIcon", 5000, 30, false);
+        Rc::get_mut(&mut no_icon).unwrap().icon_url = None;
+        // "Both" is the most popular and the newest, so it can only appear once, and
+        // New & Updated runs out: Popular fills the rest.
+        let apps = [no_icon, listed("Both", 1000, 25, false), listed("Old", 500, 1, false), listed("Older", 400, 1, false)];
+        let names: Vec<_> = picks(&apps, 10).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, ["Both", "Old", "Older"]);
     }
 
     #[test]

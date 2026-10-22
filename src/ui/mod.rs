@@ -3,6 +3,7 @@
 mod actions;
 mod app_list;
 mod app_page;
+mod featured;
 mod home;
 mod icons;
 mod markdown;
@@ -36,6 +37,8 @@ pub enum Change {
     Installed,
     /// A download moved along.
     Progress,
+    /// Something in Settings changed (other than the apps folder).
+    Settings,
 }
 
 /// Everything the store's pages share.

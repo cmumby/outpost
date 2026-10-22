@@ -6,7 +6,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use super::Store;
+use super::{Change, Store};
 use crate::{install, self_update};
 use crate::paths::Paths;
 use crate::settings::{self, Settings};
@@ -16,6 +16,37 @@ pub fn show(store: &Rc<Store>) {
         .title("Installing Apps")
         .build();
     installing.add(&apps_folder_row(store, "Apps folder"));
+
+    let settings = current_settings();
+    let slideshow = adw::PreferencesGroup::builder()
+        .title("Featured Slideshow")
+        .build();
+    let seconds = adw::SpinRow::with_range(
+        f64::from(*settings::SLIDE_SECONDS.start()),
+        f64::from(*settings::SLIDE_SECONDS.end()),
+        1.0,
+    );
+    seconds.set_title("Seconds per slide");
+    seconds.set_subtitle("How long each app shows before the next");
+    seconds.set_value(settings.slide_seconds().into());
+    {
+        let store = store.clone();
+        seconds.connect_value_notify(move |row| change_settings(&store, |s| s.slide_seconds = row.value() as u32));
+    }
+    let count = adw::SpinRow::with_range(
+        *settings::RECOMMENDATIONS.start() as f64,
+        *settings::RECOMMENDATIONS.end() as f64,
+        1.0,
+    );
+    count.set_title("Number of recommendations");
+    count.set_subtitle("Featured apps come first, then popular and newly updated ones");
+    count.set_value(settings.recommendations() as f64);
+    {
+        let store = store.clone();
+        count.connect_value_notify(move |row| change_settings(&store, |s| s.recommendations = row.value() as usize));
+    }
+    slideshow.add(&seconds);
+    slideshow.add(&count);
 
     let about = adw::PreferencesGroup::new();
     let version = adw::ActionRow::builder()
@@ -27,6 +58,7 @@ pub fn show(store: &Rc<Store>) {
 
     let page = adw::PreferencesPage::new();
     page.add(&installing);
+    page.add(&slideshow);
     page.add(&about);
     let dialog = adw::PreferencesDialog::builder().title("Settings").build();
     dialog.add(&page);
@@ -165,6 +197,24 @@ pub fn gather_apps(store: &Rc<Store>, old_folder: Option<PathBuf>) {
 
 /// Remembers the choice; the default folder is saved as "no choice", so it follows
 /// the home folder if that ever moves.
+/// The saved settings, or the defaults if there are none.
+pub fn current_settings() -> Settings {
+    Paths::settings_file().map(|file| Settings::load(&file)).unwrap_or_default()
+}
+
+/// Changes and saves a setting, then tells the pages that show it.
+pub fn change_settings(store: &Store, change: impl FnOnce(&mut Settings)) {
+    let saved = Paths::settings_file().and_then(|file| {
+        let mut settings = Settings::load(&file);
+        change(&mut settings);
+        settings.save(&file)
+    });
+    match saved {
+        Ok(()) => store.notify(Change::Settings),
+        Err(e) => store.toast(&format!("Couldn't save settings: {e}")),
+    }
+}
+
 fn save_apps_folder(folder: &Path) -> Result<(), String> {
     let file = Paths::settings_file()?;
     let mut settings = Settings::load(&file);

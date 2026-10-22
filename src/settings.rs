@@ -9,14 +9,38 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Where apps are installed. `None` means the default, ~/Applications.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub apps_folder: Option<PathBuf>,
+    /// Seconds each slide of the Featured slideshow shows. Read it with `slide_seconds()`.
+    pub slide_seconds: u32,
+    /// How many apps the Featured slideshow shows. Read it with `recommendations()`.
+    pub recommendations: usize,
+    pub slideshow_paused: bool,
+}
+
+pub const SLIDE_SECONDS: std::ops::RangeInclusive<u32> = 3..=30;
+pub const RECOMMENDATIONS: std::ops::RangeInclusive<usize> = 1..=10;
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { apps_folder: None, slide_seconds: 6, recommendations: 5, slideshow_paused: false }
+    }
 }
 
 impl Settings {
+    /// Kept in range, in case settings.json was edited by hand.
+    pub fn slide_seconds(&self) -> u32 {
+        self.slide_seconds.clamp(*SLIDE_SECONDS.start(), *SLIDE_SECONDS.end())
+    }
+
+    pub fn recommendations(&self) -> usize {
+        self.recommendations.clamp(*RECOMMENDATIONS.start(), *RECOMMENDATIONS.end())
+    }
+
     /// Missing or unreadable settings mean the defaults.
     pub fn load(file: &Path) -> Self {
         fs::read_to_string(file)
@@ -175,10 +199,20 @@ mod tests {
         let dir = scratch("save");
         let file = dir.join("settings.json");
         assert!(Settings::load(&file).apps_folder.is_none());
-        let settings = Settings { apps_folder: Some(PathBuf::from("/mnt/apps")) };
+        let settings = Settings { apps_folder: Some(PathBuf::from("/mnt/apps")), slide_seconds: 9, ..Settings::default() };
         settings.save(&file).unwrap();
-        assert_eq!(Settings::load(&file).apps_folder, Some(PathBuf::from("/mnt/apps")));
+        let loaded = Settings::load(&file);
+        assert_eq!(loaded.apps_folder, Some(PathBuf::from("/mnt/apps")));
+        assert_eq!(loaded.slide_seconds(), 9);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn older_settings_files_get_the_new_defaults() {
+        let settings: Settings = serde_json::from_str(r#"{"apps_folder": "/mnt/apps"}"#).unwrap();
+        assert_eq!((settings.slide_seconds(), settings.recommendations()), (6, 5));
+        let silly: Settings = serde_json::from_str(r#"{"slide_seconds": 0, "recommendations": 99}"#).unwrap();
+        assert_eq!((silly.slide_seconds(), silly.recommendations()), (3, 10));
     }
 
     #[test]
