@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.5.1) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.5.2) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -216,3 +216,12 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   brings up the one already open.
 - Installed rows without a store page keep their Open button lined up with the
   others.
+
+### v0.5.2: Update progress, and Update All fix
+- Rows under Updates show progress: the Update button becomes a progress bar
+  in a slot of the same width (so rows stay lined up), and the subtitle says
+  "Downloading… 42%" or "Installing…".
+- Update All could fail with "Couldn't check <folder>: No such file or
+  directory". Each install checks the apps folder with a small test file, and
+  every check used the same name, so one install deleted it while another was
+  still checking. Each check now uses its own file.
