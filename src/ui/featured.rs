@@ -38,6 +38,16 @@ const CSS: &str = "
   font-size: 0.85em;
 }
 .outpost-slide .outpost-summary { opacity: 0.85; }
+.outpost-slide-edge,
+.outpost-slide-edge:hover,
+.outpost-slide-edge:active {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  min-width: 0;
+}
+.outpost-slide-edge:hover > button { filter: brightness(1.6); }
+.outpost-slide-edge:active > button { filter: brightness(2); }
 ";
 
 thread_local! {
@@ -202,15 +212,25 @@ impl Slideshow {
     }
 }
 
+/// The arrow on one side. The round arrow is only what it looks like: the whole
+/// strip from the slide's edge to just past it, top to bottom, is the button, so
+/// it's hard to miss and open the app by accident.
 fn arrow(icon: &str, tooltip: &str, side: gtk::Align) -> gtk::Button {
-    gtk::Button::builder()
+    let look = gtk::Button::builder()
         .icon_name(icon)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .can_target(false)
+        .focusable(false)
+        .css_classes(["circular", "osd"])
+        .build();
+    gtk::Button::builder()
+        .child(&look)
         .tooltip_text(tooltip)
         .halign(side)
-        .valign(gtk::Align::Center)
-        .margin_start(12)
-        .margin_end(12)
-        .css_classes(["circular", "osd"])
+        .valign(gtk::Align::Fill)
+        .width_request(84)
+        .css_classes(["outpost-slide-edge"])
         .build()
 }
 
