@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.5.2) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.6.0) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -225,3 +225,23 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   directory". Each install checks the apps folder with a small test file, and
   every check used the same name, so one install deleted it while another was
   still checking. Each check now uses its own file.
+
+### v0.6.0: Featured slideshow, and cleaner text everywhere
+- Explore opens with a Featured slideshow: big slides against a deep shade of
+  each app's icon color (worked out from the icon's most common vivid hue),
+  moving along on their own. Arrows (each side's whole strip is the button),
+  dots, and a pause button that's remembered.
+- Slides: every hand-picked (`featured`) app first, then the slots left split
+  between Popular and New & Updated, Popular taking the odd one, each badged.
+  If one list runs out the other fills in; no app twice; apps need an icon.
+- Settings → Featured Slideshow: seconds per slide (3–30, default 6) and number
+  of recommendations (1–10, default 5), applied straight away.
+- The index cleans text as it's built: AppImageHub's HTML descriptions become
+  simple Markdown and summaries plain text (they showed "<p>…" before). The
+  index's tests run before every build.
+- App pages lay out descriptions like release notes. The Markdown reader now
+  handles tables, underlined headings, HTML (kept as text and links instead of
+  dropping the line), quotes and GitHub alerts, badges, entities, escapes,
+  `__bold__`, `~~strike~~`, checklists and common emoji codes. Checked against
+  every published note and description (`OUTPOST_NOTES_DIR=<folder> cargo test
+  -- --ignored`).
