@@ -57,21 +57,30 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
     );
 
     let rows: Rc<std::cell::RefCell<Vec<(adw::PreferencesGroup, adw::ActionRow)>>> = Rc::default();
+    // Redraws each update row's progress.
+    let progress_shown: Rc<std::cell::RefCell<Vec<Rc<dyn Fn()>>>> = Rc::default();
     let refresh = {
         let store = Rc::downgrade(store);
         let stack = stack.clone();
         move |change: Change| {
             let Some(store) = store.upgrade() else { return false };
+            if change == Change::Progress {
+                for show in progress_shown.borrow().iter() {
+                    show();
+                }
+            }
             if change != Change::Installed {
                 return true;
             }
+            progress_shown.borrow_mut().clear();
             for (group, row) in rows.take() {
                 group.remove(&row);
             }
 
             let updates = store.updates();
             for (installed, app) in &updates {
-                let row = update_row(&store, installed, app);
+                let (row, show_progress) = update_row(&store, installed, app);
+                progress_shown.borrow_mut().push(show_progress);
                 updates_group.add(&row);
                 rows.borrow_mut().push((updates_group.clone(), row));
             }
@@ -137,14 +146,12 @@ fn app_row(store: &Rc<Store>, app: &InstalledApp) -> adw::ActionRow {
     row
 }
 
-fn update_row(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) -> adw::ActionRow {
+/// A row under Updates, and a function that shows its download progress.
+fn update_row(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) -> (adw::ActionRow, Rc<dyn Fn()>) {
+    let versions = format!("{} → {}", installed.version.as_deref().unwrap_or("?"), app.latest_version);
     let row = adw::ActionRow::builder()
         .title(installed.name.as_str())
-        .subtitle(format!(
-            "{} → {}",
-            installed.version.as_deref().unwrap_or("?"),
-            app.latest_version
-        ))
+        .subtitle(versions.as_str())
         .use_markup(false)
         .activatable(true)
         .tooltip_text("See what's new")
@@ -157,17 +164,57 @@ fn update_row(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) -> adw
         row.connect_activated(move |_| super::whats_new::show(&store, &installed, &app));
     }
 
+    // While the app updates, a progress bar takes the Update button's place. Both
+    // sit in a slot of fixed width, so the rows stay lined up.
     let update = gtk::Button::builder()
-        .label(if store.progress(app).is_some() { "Updating…" } else { "Update" })
-        .sensitive(store.progress(app).is_none())
+        .label("Update")
         .valign(gtk::Align::Center)
+        .halign(gtk::Align::End)
+        .hexpand(true)
         .build();
-    row.add_suffix(&update);
-    let (store, app) = (store.clone(), app.clone());
-    update.connect_clicked(move |button| {
-        button.set_sensitive(false);
-        button.set_label("Updating…");
-        store.install(&app);
-    });
-    row
+    let bar = gtk::ProgressBar::builder()
+        .valign(gtk::Align::Center)
+        .hexpand(true)
+        .visible(false)
+        .build();
+    let slot = gtk::Box::builder().width_request(140).build();
+    slot.append(&bar);
+    slot.append(&update);
+    row.add_suffix(&slot);
+    {
+        let (store, app) = (store.clone(), app.clone());
+        update.connect_clicked(move |_| store.install(&app));
+    }
+
+    let show_progress = {
+        let (store, app, row) = (Rc::downgrade(store), app.clone(), row.clone());
+        move || {
+            let Some(store) = store.upgrade() else { return };
+            let Some(progress) = store.progress(&app) else {
+                bar.set_visible(false);
+                update.set_visible(true);
+                row.set_subtitle(&versions);
+                return;
+            };
+            let status = match progress.fraction() {
+                _ if progress.finished_downloading() => {
+                    bar.set_fraction(1.0);
+                    "Installing…".to_string()
+                }
+                Some(fraction) => {
+                    bar.set_fraction(fraction);
+                    format!("Downloading… {:.0}%", fraction * 100.0)
+                }
+                None => {
+                    bar.pulse();
+                    "Downloading…".to_string()
+                }
+            };
+            update.set_visible(false);
+            bar.set_visible(true);
+            row.set_subtitle(&format!("{versions} · {status}"));
+        }
+    };
+    show_progress();
+    (row, Rc::new(show_progress))
 }
