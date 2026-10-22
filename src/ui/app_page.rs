@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
-use super::{Store, icons};
+use super::{Store, icons, markdown};
 use crate::index::{self, App};
 
 pub fn build(store: &Rc<Store>, app: &Rc<App>) -> adw::NavigationPage {
@@ -36,15 +36,17 @@ pub fn build(store: &Rc<Store>, app: &Rc<App>) -> adw::NavigationPage {
         );
     }
 
-    if !app.description.is_empty() && app.description != app.summary {
-        content.append(
-            &gtk::Label::builder()
-                .label(app.description.as_str())
-                .wrap(true)
-                .xalign(0.0)
-                .selectable(true)
-                .build(),
-        );
+    if app.description != app.summary {
+        let description = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(10)
+            .build();
+        for (i, block) in markdown::blocks(&app.description).into_iter().enumerate() {
+            description.append(&markdown::widget(block, i == 0));
+        }
+        if description.first_child().is_some() {
+            content.append(&description);
+        }
     }
     content.append(&details(store, app));
 
