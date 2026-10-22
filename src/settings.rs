@@ -5,6 +5,7 @@ use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -52,8 +53,11 @@ pub fn prepare_apps_folder(dir: &Path) -> Result<(), String> {
         _ => format!("Couldn't create {shown}: {e}."),
     })?;
 
-    // Save a small file, mark it as a program, and check the mark stuck.
-    let probe = dir.join(format!(".outpost-check-{}", process::id()));
+    // Save a small file, mark it as a program, and check the mark stuck. Each check
+    // gets its own file, since several installs can check the folder at once.
+    static CHECKS: AtomicU64 = AtomicU64::new(0);
+    let check = CHECKS.fetch_add(1, Ordering::Relaxed);
+    let probe = dir.join(format!(".outpost-check-{}-{check}", process::id()));
     let checked = fs::write(&probe, "#!/bin/sh\n")
         .map_err(|e| match e.kind() {
             ErrorKind::PermissionDenied => format!(
@@ -142,6 +146,23 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
         // (Running as root would ignore the permissions; this is for normal users.)
         assert!(error.contains("permission"), "{error}");
+    }
+
+    #[test]
+    fn checks_running_at_once_dont_trip_each_other() {
+        // "Update All" checks the folder once per app, all at the same time.
+        let dir = scratch("together");
+        let errors: Vec<String> = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                std::thread::spawn(move || (0..50).filter_map(|_| prepare_apps_folder(&dir).err()).collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(|thread| thread.join().unwrap())
+            .collect();
+        let _ = fs::remove_dir_all(dir);
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]
