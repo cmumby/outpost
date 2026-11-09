@@ -1,11 +1,12 @@
 //! The Installed tab: apps installed through Outpost.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 
 use super::{Change, Store, icons, settings_page};
 use crate::{install, self_update};
@@ -272,13 +273,60 @@ fn found_files(store: &Store) -> Vec<PathBuf> {
     install::untracked(&paths, &skip)
 }
 
+/// A found file's name and icon, once read: `None` if it couldn't be.
+type Preview = Option<(String, Option<gdk::Texture>)>;
+
+thread_local! {
+    /// Previews already read, by file and when it last changed, so reopening the
+    /// tab doesn't run every file again.
+    static PREVIEWS: RefCell<HashMap<(PathBuf, Option<std::time::SystemTime>), Preview>> = RefCell::default();
+}
+
 fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
+    let file_name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let row = adw::ActionRow::builder()
-        .title(file.file_name().unwrap_or_default().to_string_lossy().as_ref())
+        .title(file_name.as_str())
         .subtitle("Not added to Outpost")
         .use_markup(false)
         .build();
-    row.add_prefix(&gtk::Image::builder().icon_name("outpost-application-x-executable-symbolic").pixel_size(48).css_classes(["dim-label"]).build());
+    let icon = gtk::Image::builder()
+        .icon_name("outpost-application-x-executable-symbolic")
+        .pixel_size(48)
+        .css_classes(["dim-label"])
+        .build();
+    row.add_prefix(&icon);
+
+    // Show the app's own name and icon once they've been read from inside it.
+    let show = {
+        let (row, icon) = (row.downgrade(), icon.downgrade());
+        move |preview: &Preview| {
+            let (Some(row), Some(icon), Some((name, texture))) = (row.upgrade(), icon.upgrade(), preview) else {
+                return;
+            };
+            row.set_title(name);
+            row.set_subtitle(&format!("{file_name} · Not added to Outpost"));
+            if let Some(texture) = texture {
+                icon.set_paintable(Some(texture));
+                icon.remove_css_class("dim-label");
+            }
+        }
+    };
+    let key = (file.to_path_buf(), std::fs::metadata(file).and_then(|meta| meta.modified()).ok());
+    match PREVIEWS.with_borrow(|previews| previews.get(&key).cloned()) {
+        Some(preview) => show(&preview),
+        None => {
+            let (paths, file) = (store.paths(), file.to_path_buf());
+            glib::spawn_future_local(async move {
+                let found = gio::spawn_blocking(move || install::preview(&paths, &file)).await.ok().flatten();
+                let preview = found.map(|(name, icon)| {
+                    let texture = icon.and_then(|bytes| gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok());
+                    (name, texture)
+                });
+                show(&preview);
+                PREVIEWS.with_borrow_mut(|previews| previews.insert(key, preview));
+            });
+        }
+    }
 
     let add = gtk::Button::builder()
         .label("Add")

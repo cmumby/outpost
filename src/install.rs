@@ -199,6 +199,20 @@ pub fn untracked(paths: &Paths, skip: &[PathBuf]) -> Vec<PathBuf> {
     found
 }
 
+/// The name and icon (PNG or SVG data) inside an AppImage Outpost hasn't added,
+/// for showing it before it is. Reading them means running the file in extract
+/// mode, so files that aren't marked runnable are left alone (`None`).
+pub fn preview(paths: &Paths, appimage: &Path) -> Option<(String, Option<Vec<u8>>)> {
+    let runnable = fs::metadata(appimage).is_ok_and(|meta| meta.permissions().mode() & 0o100 != 0);
+    if !runnable {
+        return None;
+    }
+    fs::create_dir_all(&paths.cache).ok()?;
+    let meta = read_metadata(paths, appimage).ok()?;
+    let name = desktop::get(&meta.desktop, "Name").unwrap_or_else(|| sanitize_id(&meta.desktop_stem));
+    Some((name, meta.icon))
+}
+
 /// Starts managing an AppImage that's already in the apps folder: makes it
 /// runnable, adds it to the launcher and records it, leaving the file where it is
 /// under its own name. `listing(name)` finds the app's store id from its name, so
