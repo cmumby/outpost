@@ -136,19 +136,7 @@ fn install_incoming(
 
     fs::rename(incoming, &appimage_path)
         .map_err(|e| format!("could not move the AppImage into place: {e}"))?;
-
-    let (icon_path, icon_value) = match meta.icon.as_deref().map(|bytes| place_icon(paths, &id, bytes)) {
-        Some(Ok(Some((path, value)))) => (Some(path), value),
-        Some(Err(e)) => return Err(e),
-        // No icon, or one we don't recognise: use a generic one.
-        _ => (None, "application-x-executable".to_string()),
-    };
-
-    let desktop_path = paths.desktop_entries.join(format!("outpost-{id}.desktop"));
-    let launcher_entry = desktop::rewrite(&meta.desktop, &appimage_path, &icon_value, &id, &meta.desktop_stem);
-    fs::write(&desktop_path, launcher_entry)
-        .map_err(|e| format!("could not write {}: {e}", desktop_path.display()))?;
-    refresh_launcher(paths);
+    let (icon_path, desktop_path) = add_to_launcher(paths, &meta, &id, &appimage_path)?;
 
     let app = InstalledApp {
         id,
@@ -160,6 +148,98 @@ fn install_incoming(
         installed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         source: source.to_string(),
         index_id: entry.map(|entry| entry.id.to_string()),
+    };
+    state.apps.push(app.clone());
+    state.save(&paths.installed_json())?;
+    Ok(app)
+}
+
+/// Saves the app's icon and writes its launcher entry, pointing at `appimage`.
+/// Returns the icon's path (if it had one Outpost could use) and the entry's path.
+fn add_to_launcher(
+    paths: &Paths,
+    meta: &Metadata,
+    id: &str,
+    appimage: &Path,
+) -> Result<(Option<PathBuf>, PathBuf), String> {
+    let (icon_path, icon_value) = match meta.icon.as_deref().map(|bytes| place_icon(paths, id, bytes)) {
+        Some(Ok(Some((path, value)))) => (Some(path), value),
+        Some(Err(e)) => return Err(e),
+        // No icon, or one we don't recognise: use a generic one.
+        _ => (None, "application-x-executable".to_string()),
+    };
+    let desktop_path = paths.desktop_entries.join(format!("outpost-{id}.desktop"));
+    let launcher_entry = desktop::rewrite(&meta.desktop, appimage, &icon_value, id, &meta.desktop_stem);
+    fs::write(&desktop_path, launcher_entry)
+        .map_err(|e| format!("could not write {}: {e}", desktop_path.display()))?;
+    refresh_launcher(paths);
+    Ok((icon_path, desktop_path))
+}
+
+/// AppImages in the apps folder that Outpost didn't install, such as ones copied
+/// there by hand, by file name. `skip` lists files to leave out (Outpost itself,
+/// and ones the user hid). Only the first bytes of each file are read, so this is
+/// quick.
+pub fn untracked(paths: &Paths, skip: &[PathBuf]) -> Vec<PathBuf> {
+    let installed: Vec<PathBuf> = list(paths).unwrap_or_default().into_iter().map(|app| app.appimage_path).collect();
+    let Ok(entries) = fs::read_dir(&paths.applications) else { return Vec::new() };
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            // Hidden files include Outpost's own half-finished downloads.
+            !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with('.'))
+                && path.is_file()
+                && !installed.contains(path)
+                && !skip.contains(path)
+                && matches!(appimage::detect(path), Ok(AppImageType::Two))
+        })
+        .collect();
+    found.sort_by_key(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()));
+    found
+}
+
+/// Starts managing an AppImage that's already in the apps folder: makes it
+/// runnable, adds it to the launcher and records it, leaving the file where it is
+/// under its own name. `listing(name)` finds the app's store id from its name, so
+/// it gets a store page and updates.
+pub fn add_existing(
+    paths: &Paths,
+    appimage: &Path,
+    listing: impl FnOnce(&str) -> Option<String>,
+) -> Result<InstalledApp, String> {
+    let label = appimage.file_name().map_or_else(|| appimage.display().to_string(), |n| n.to_string_lossy().into_owned());
+    check_appimage(appimage, &label)?;
+    // Reading its name and icon means running it, so it has to be runnable first.
+    make_executable(appimage)?;
+    for dir in [&paths.desktop_entries, &paths.data, &paths.cache] {
+        fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    }
+    let meta = read_metadata(paths, appimage)?;
+    let id = sanitize_id(&meta.desktop_stem);
+    let name = desktop::get(&meta.desktop, "Name").unwrap_or_else(|| id.clone());
+
+    let _lock = lock_state();
+    let mut state = InstalledState::load(&paths.installed_json())?;
+    if let Some(other) = state.find(&id) {
+        return Err(format!(
+            "{name} is already installed ({}), so {label} looks like a second copy of it. \
+             You can delete it, or hide it from this list",
+            other.appimage_path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+    }
+    let (icon_path, desktop_path) = add_to_launcher(paths, &meta, &id, appimage)?;
+
+    let app = InstalledApp {
+        index_id: listing(&name),
+        id,
+        name,
+        version: desktop::get(&meta.desktop, "X-AppImage-Version"),
+        appimage_path: appimage.to_path_buf(),
+        desktop_path,
+        icon_path,
+        installed_at: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+        source: appimage.display().to_string(),
     };
     state.apps.push(app.clone());
     state.save(&paths.installed_json())?;
@@ -417,6 +497,70 @@ impl Drop for RemoveDirOnDrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_appimages_outpost_did_not_install() {
+        let dir = std::env::temp_dir().join(format!("outpost-test-untracked-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = Paths {
+            applications: dir.join("apps"),
+            desktop_entries: dir.join("entries"),
+            icons: dir.join("icons"),
+            data: dir.join("data"),
+            cache: dir.join("cache"),
+        };
+        fs::create_dir_all(&paths.applications).unwrap();
+        // Just enough of an AppImage for `appimage::detect`: ELF, then "AI" and the type.
+        let appimage = b"\x7fELF\x02\x01\x01\x00AI\x02 and the rest";
+        let apps = &paths.applications;
+        for name in ["Zed.AppImage", "lichii-linux-x86_64.AppImage", "Godot", ".outpost-incoming-1.AppImage", "Outpost.AppImage"] {
+            fs::write(apps.join(name), appimage).unwrap();
+        }
+        fs::write(apps.join("notes.txt"), "not an app").unwrap();
+        fs::write(apps.join("old.AppImage"), b"\x7fELF\x02\x01\x01\x00AI\x01 type 1").unwrap();
+        fs::create_dir(apps.join("Backups")).unwrap();
+
+        let found = untracked(&paths, &[apps.join("Outpost.AppImage")]);
+        // Sorted by name; Godot has no .AppImage ending but is one inside.
+        assert_eq!(found, [apps.join("Godot"), apps.join("lichii-linux-x86_64.AppImage"), apps.join("Zed.AppImage")]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Downloads a real AppImage (about 14 MB), so it only runs when asked:
+    /// `cargo test -- --ignored`
+    #[test]
+    #[ignore]
+    fn adds_an_appimage_already_in_the_folder() {
+        let dir = std::env::temp_dir().join(format!("outpost-test-add-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = Paths {
+            applications: dir.join("apps"),
+            desktop_entries: dir.join("entries"),
+            icons: dir.join("icons"),
+            data: dir.join("data"),
+            cache: dir.join("cache"),
+        };
+        fs::create_dir_all(&paths.applications).unwrap();
+        let file = paths.applications.join("my-tool.AppImage");
+        let url = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage";
+        download::download(url, &file, |_, _| {}).unwrap();
+        // Downloaded files aren't runnable yet; adding makes them so.
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(untracked(&paths, &[]), [file.clone()]);
+
+        let app = add_existing(&paths, &file, |name| (name == "appimagetool").then(|| "store-id".to_string())).unwrap();
+        // The file stays where it was, under its own name, now runnable.
+        assert_eq!(app.appimage_path, file);
+        assert!(fs::metadata(&file).unwrap().permissions().mode() & 0o100 != 0);
+        assert_eq!(app.index_id.as_deref(), Some("store-id"));
+        assert!(fs::read_to_string(&app.desktop_path).unwrap().contains(&format!("Exec={}", file.display())));
+        assert!(untracked(&paths, &[]).is_empty());
+        // A second copy of the same app is refused.
+        let copy = paths.applications.join("copy.AppImage");
+        fs::copy(&file, &copy).unwrap();
+        assert!(add_existing(&paths, &copy, |_| None).unwrap_err().contains("already installed"));
+        let _ = fs::remove_dir_all(dir);
+    }
 
     /// Downloads a real AppImage (about 14 MB), so it only runs when asked:
     /// `cargo test -- --ignored`

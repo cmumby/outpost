@@ -1,10 +1,14 @@
 //! The Installed tab: apps installed through Outpost.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
+use gtk::{gio, glib};
 
-use super::{Change, Store, icons};
+use super::{Change, Store, icons, settings_page};
+use crate::{install, self_update};
 use crate::index::App;
 use crate::state::InstalledApp;
 
@@ -38,6 +42,24 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
     }
 
     let group = adw::PreferencesGroup::builder().title("Installed").build();
+
+    let found_group = adw::PreferencesGroup::builder()
+        .title("Found in Your Apps Folder")
+        .description("AppImages Outpost didn't install. Add them to open, update and uninstall them here, and to put them in your launcher.")
+        .build();
+    let add_all = gtk::Button::builder()
+        .label("Add All")
+        .valign(gtk::Align::Center)
+        .build();
+    found_group.set_header_suffix(Some(&add_all));
+    {
+        let store = Rc::downgrade(store);
+        add_all.connect_clicked(move |button| {
+            let Some(store) = store.upgrade() else { return };
+            button.set_sensitive(false);
+            add_files(&store, found_files(&store));
+        });
+    }
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(24)
@@ -48,6 +70,7 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
         .build();
     content.append(&updates_group);
     content.append(&group);
+    content.append(&found_group);
     stack.add_named(
         &gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -94,12 +117,32 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
                 group.add(&row);
                 rows.borrow_mut().push((group.clone(), row));
             }
-            stack.set_visible_child_name(if apps.is_empty() { "empty" } else { "list" });
+
+            let found = found_files(&store);
+            for file in &found {
+                let row = found_row(&store, file);
+                found_group.add(&row);
+                rows.borrow_mut().push((found_group.clone(), row));
+            }
+            found_group.set_visible(!found.is_empty());
+            add_all.set_sensitive(true);
+
+            group.set_visible(!apps.is_empty());
+            stack.set_visible_child_name(if apps.is_empty() && found.is_empty() { "empty" } else { "list" });
             true
         }
     };
     refresh(Change::Installed);
     store.watch(refresh);
+    {
+        // Look again each time the tab opens, for AppImages copied in since.
+        let store = Rc::downgrade(store);
+        stack.connect_map(move |_| {
+            if let Some(store) = store.upgrade() {
+                store.reload_installed();
+            }
+        });
+    }
     stack
 }
 
@@ -217,4 +260,101 @@ fn update_row(store: &Rc<Store>, installed: &InstalledApp, app: &Rc<App>) -> (ad
     };
     show_progress();
     (row, Rc::new(show_progress))
+}
+
+/// AppImages in the apps folder Outpost didn't install, apart from Outpost itself
+/// and ones the user hid.
+fn found_files(store: &Store) -> Vec<PathBuf> {
+    let paths = store.paths();
+    let mut skip = settings_page::current_settings().hidden_files;
+    skip.push(self_update::home(&paths));
+    skip.extend(self_update::running_appimage());
+    install::untracked(&paths, &skip)
+}
+
+fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(file.file_name().unwrap_or_default().to_string_lossy().as_ref())
+        .subtitle("Not added to Outpost")
+        .use_markup(false)
+        .build();
+    row.add_prefix(&gtk::Image::builder().icon_name("outpost-application-x-executable-symbolic").pixel_size(48).css_classes(["dim-label"]).build());
+
+    let add = gtk::Button::builder()
+        .label("Add")
+        .valign(gtk::Align::Center)
+        .build();
+    let hide = gtk::Button::builder()
+        .label("Hide")
+        .tooltip_text("Leave this file alone and stop listing it")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    row.add_suffix(&hide);
+    row.add_suffix(&add);
+    // Matches the arrow on installed rows, so the buttons line up.
+    let spacer = gtk::Image::from_icon_name("outpost-go-next-symbolic");
+    spacer.set_opacity(0.0);
+    row.add_suffix(&spacer);
+
+    {
+        let (store, file) = (store.clone(), file.to_path_buf());
+        add.connect_clicked(move |button| {
+            button.set_sensitive(false);
+            button.set_label("Adding…");
+            add_files(&store, vec![file.clone()]);
+        });
+    }
+    {
+        let (store, file) = (store.clone(), file.to_path_buf());
+        hide.connect_clicked(move |_| {
+            settings_page::change_settings(&store, |settings| settings.hidden_files.push(file.clone()));
+            store.reload_installed();
+        });
+    }
+    row
+}
+
+/// Adds `files` to Outpost one after another in the background, then says how it
+/// went.
+fn add_files(store: &Rc<Store>, files: Vec<PathBuf>) {
+    // Store ids by app name, so an added app that's also in the store gets its
+    // page and updates. Hand-picked and followed apps win when names clash.
+    let mut listings: HashMap<String, (String, bool)> = HashMap::new();
+    for app in store.apps().iter() {
+        let key = app.name.to_lowercase();
+        if listings.get(&key).is_none_or(|(_, trusted)| !trusted && app.is_trusted()) {
+            listings.insert(key, (app.id.clone(), app.is_trusted()));
+        }
+    }
+    let store = store.clone();
+    glib::spawn_future_local(async move {
+        let paths = store.paths();
+        let results = gio::spawn_blocking(move || {
+            files
+                .iter()
+                .map(|file| {
+                    install::add_existing(&paths, file, |name| {
+                        listings.get(&name.to_lowercase()).map(|(id, _)| id.clone())
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_else(|_| vec![Err("adding crashed".into())]);
+
+        let (added, failed): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
+        let added: Vec<_> = added.into_iter().flatten().map(|app| app.name).collect();
+        let failed: Vec<_> = failed.into_iter().filter_map(Result::err).collect();
+        match added.as_slice() {
+            [] => {}
+            [one] => store.toast(&format!("{one} was added")),
+            many => store.toast(&format!("{} apps were added", many.len())),
+        }
+        if !failed.is_empty() {
+            let heading = if failed.len() == 1 { "Couldn't Add an App" } else { "Couldn't Add Some Apps" };
+            store.alert(heading, &failed.iter().map(|e| super::actions::capitalize(e)).collect::<Vec<_>>().join("\n\n"));
+        }
+        store.reload_installed();
+    });
 }

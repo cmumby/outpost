@@ -20,6 +20,9 @@ pub struct Settings {
     /// How many apps the Featured slideshow shows. Read it with `recommendations()`.
     pub recommendations: usize,
     pub slideshow_paused: bool,
+    /// AppImages in the apps folder the user chose not to add to Outpost.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_files: Vec<PathBuf>,
 }
 
 pub const SLIDE_SECONDS: std::ops::RangeInclusive<u32> = 3..=30;
@@ -27,7 +30,7 @@ pub const RECOMMENDATIONS: std::ops::RangeInclusive<usize> = 1..=10;
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { apps_folder: None, slide_seconds: 6, recommendations: 5, slideshow_paused: false }
+        Self { apps_folder: None, slide_seconds: 6, recommendations: 5, slideshow_paused: false, hidden_files: Vec::new() }
     }
 }
 

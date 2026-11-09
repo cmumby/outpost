@@ -159,7 +159,7 @@ fn clean_environment(context: &gtk::gdk::AppLaunchContext) {
 
 /// Our error messages start lower-case so they read well after "Error: " on the
 /// command line; dialogs want a capital letter.
-fn capitalize(text: &str) -> String {
+pub(super) fn capitalize(text: &str) -> String {
     let mut chars = text.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
