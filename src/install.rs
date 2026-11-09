@@ -199,12 +199,16 @@ pub fn untracked(paths: &Paths, skip: &[PathBuf]) -> Vec<PathBuf> {
     found
 }
 
+/// Whether the file is marked as a program its owner can run.
+pub fn is_runnable(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o100 != 0)
+}
+
 /// The name and icon (PNG or SVG data) inside an AppImage Outpost hasn't added,
 /// for showing it before it is. Reading them means running the file in extract
 /// mode, so files that aren't marked runnable are left alone (`None`).
 pub fn preview(paths: &Paths, appimage: &Path) -> Option<(String, Option<Vec<u8>>)> {
-    let runnable = fs::metadata(appimage).is_ok_and(|meta| meta.permissions().mode() & 0o100 != 0);
-    if !runnable {
+    if !is_runnable(appimage) {
         return None;
     }
     fs::create_dir_all(&paths.cache).ok()?;
@@ -451,7 +455,7 @@ fn remove_files(app: &InstalledApp) -> Result<(), String> {
 }
 
 /// `chmod u+x` and friends: owner can read/write/run, everyone else can read/run.
-fn make_executable(path: &Path) -> Result<(), String> {
+pub fn make_executable(path: &Path) -> Result<(), String> {
     let mut permissions = fs::metadata(path)
         .map_err(|e| format!("could not read {}: {e}", path.display()))?
         .permissions();
@@ -537,6 +541,15 @@ mod tests {
         let found = untracked(&paths, &[apps.join("Outpost.AppImage")]);
         // Sorted by name; Godot has no .AppImage ending but is one inside.
         assert_eq!(found, [apps.join("Godot"), apps.join("lichii-linux-x86_64.AppImage"), apps.join("Zed.AppImage")]);
+
+        // Files are listed whether or not they may run yet, and can be allowed to.
+        let zed = apps.join("Zed.AppImage");
+        fs::set_permissions(&zed, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(!is_runnable(&zed));
+        make_executable(&zed).unwrap();
+        assert!(is_runnable(&zed));
+        // Only permissions are added, never taken away.
+        assert_eq!(fs::metadata(&zed).unwrap().permissions().mode() & 0o777, 0o755);
         let _ = fs::remove_dir_all(dir);
     }
 

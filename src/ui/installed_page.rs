@@ -355,12 +355,22 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
+    // Shown only while the file isn't allowed to run, at the start of the buttons
+    // so the others still line up.
+    let allow = gtk::Button::builder()
+        .icon_name("outpost-media-playback-start-symbolic")
+        .tooltip_text("Allow This File to Run")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "circular"])
+        .visible(!install::is_runnable(file))
+        .build();
     let delete = gtk::Button::builder()
         .icon_name("outpost-user-trash-symbolic")
         .tooltip_text("Delete This File")
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
+    row.add_suffix(&allow);
     row.add_suffix(&hide);
     row.add_suffix(&add);
     row.add_suffix(&delete);
@@ -387,6 +397,17 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
     {
         let (store, file) = (store.clone(), file.to_path_buf());
         delete.connect_clicked(move |_| delete_file(&store, &file));
+    }
+    {
+        let (store, file) = (store.clone(), file.to_path_buf());
+        allow.connect_clicked(move |_| match install::make_executable(&file) {
+            Ok(()) => {
+                // Read it again now it can run, for its real name and icon.
+                PREVIEWS.with_borrow_mut(|previews| previews.retain(|(path, _), _| *path != file));
+                store.reload_installed();
+            }
+            Err(e) => store.alert("Couldn't Allow It to Run", &super::actions::capitalize(&e)),
+        });
     }
     row
 }
