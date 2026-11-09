@@ -355,8 +355,15 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
+    let delete = gtk::Button::builder()
+        .icon_name("outpost-user-trash-symbolic")
+        .tooltip_text("Delete This File")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat"])
+        .build();
     row.add_suffix(&hide);
     row.add_suffix(&add);
+    row.add_suffix(&delete);
     // Matches the arrow on installed rows, so the buttons line up.
     let spacer = gtk::Image::from_icon_name("outpost-go-next-symbolic");
     spacer.set_opacity(0.0);
@@ -377,7 +384,38 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
             store.reload_installed();
         });
     }
+    {
+        let (store, file) = (store.clone(), file.to_path_buf());
+        delete.connect_clicked(move |_| delete_file(&store, &file));
+    }
     row
+}
+
+/// Asks first, then deletes a found AppImage for good.
+fn delete_file(store: &Rc<Store>, file: &Path) {
+    let name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let dialog = adw::AlertDialog::new(
+        Some(&format!("Delete {name}?")),
+        Some("The file will be deleted from your apps folder for good. This can't be undone."),
+    );
+    dialog.add_responses(&[("cancel", "Cancel"), ("delete", "Delete")]);
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+
+    let window = store.window.clone();
+    let (store, file) = (store.clone(), file.to_path_buf());
+    dialog.connect_response(Some("delete"), move |_, _| {
+        match std::fs::remove_file(&file) {
+            Ok(()) => {
+                AUTO_FAILED.with_borrow_mut(|problems| problems.remove(&file));
+                store.toast(&format!("{name} was deleted"));
+            }
+            Err(e) => store.alert(&format!("Couldn't Delete {name}"), &super::actions::capitalize(&e.to_string())),
+        }
+        store.reload_installed();
+    });
+    dialog.present(Some(&window));
 }
 
 /// Adds `files` to Outpost one after another in the background, then says how it
