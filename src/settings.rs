@@ -20,6 +20,8 @@ pub struct Settings {
     /// How many apps the Featured slideshow shows. Read it with `recommendations()`.
     pub recommendations: usize,
     pub slideshow_paused: bool,
+    /// Add AppImages found in the apps folder without asking.
+    pub add_found_apps: bool,
     /// AppImages in the apps folder the user chose not to add to Outpost.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_files: Vec<PathBuf>,
@@ -30,7 +32,7 @@ pub const RECOMMENDATIONS: std::ops::RangeInclusive<usize> = 1..=10;
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { apps_folder: None, slide_seconds: 6, recommendations: 5, slideshow_paused: false, hidden_files: Vec::new() }
+        Self { apps_folder: None, slide_seconds: 6, recommendations: 5, slideshow_paused: false, add_found_apps: false, hidden_files: Vec::new() }
     }
 }
 
@@ -214,6 +216,7 @@ mod tests {
     fn older_settings_files_get_the_new_defaults() {
         let settings: Settings = serde_json::from_str(r#"{"apps_folder": "/mnt/apps"}"#).unwrap();
         assert_eq!((settings.slide_seconds(), settings.recommendations()), (6, 5));
+        assert!(!settings.add_found_apps, "adding found apps is opt-in");
         let silly: Settings = serde_json::from_str(r#"{"slide_seconds": 0, "recommendations": 99}"#).unwrap();
         assert_eq!((silly.slide_seconds(), silly.recommendations()), (3, 10));
     }

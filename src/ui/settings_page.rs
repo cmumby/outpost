@@ -16,6 +16,20 @@ pub fn show(store: &Rc<Store>) {
         .title("Installing Apps")
         .build();
     installing.add(&apps_folder_row(store, "Apps folder"));
+    let add_found = adw::SwitchRow::builder()
+        .title("Add AppImages found in the apps folder")
+        .subtitle("AppImages copied into the folder are added to Outpost on their own. When off, you choose which to add on the Installed tab.")
+        .active(current_settings().add_found_apps)
+        .build();
+    {
+        let store = store.clone();
+        add_found.connect_active_notify(move |row| {
+            change_settings(&store, |s| s.add_found_apps = row.is_active());
+            // Look at the folder again, so turning it on adds what's there now.
+            store.reload_installed();
+        });
+    }
+    installing.add(&add_found);
 
     let settings = current_settings();
     let slideshow = adw::PreferencesGroup::builder()

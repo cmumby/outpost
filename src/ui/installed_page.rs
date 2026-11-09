@@ -58,7 +58,7 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
         add_all.connect_clicked(move |button| {
             let Some(store) = store.upgrade() else { return };
             button.set_sensitive(false);
-            add_files(&store, found_files(&store));
+            add_files(&store, found_files(&store), false);
         });
     }
     let content = gtk::Box::builder()
@@ -120,6 +120,16 @@ pub fn build(store: &Rc<Store>) -> gtk::Stack {
             }
 
             let found = found_files(&store);
+            if settings_page::current_settings().add_found_apps {
+                // Each file gets one try per session, so one that can't be added
+                // isn't tried again on every refresh.
+                let new: Vec<_> = AUTO_TRIED.with_borrow_mut(|tried| {
+                    found.iter().filter(|file| tried.insert((*file).clone())).cloned().collect()
+                });
+                if !new.is_empty() {
+                    add_files(&store, new, true);
+                }
+            }
             for file in &found {
                 let row = found_row(&store, file);
                 found_group.add(&row);
@@ -277,6 +287,10 @@ fn found_files(store: &Store) -> Vec<PathBuf> {
 type Preview = Option<(String, Option<gdk::Texture>)>;
 
 thread_local! {
+    /// Files already added automatically, or tried and failed, this session.
+    static AUTO_TRIED: RefCell<std::collections::HashSet<PathBuf>> = RefCell::default();
+    /// Why automatic adding failed, by file, shown on its row instead of an alert.
+    static AUTO_FAILED: RefCell<HashMap<PathBuf, String>> = RefCell::default();
     /// Previews already read, by file and when it last changed, so reopening the
     /// tab doesn't run every file again.
     static PREVIEWS: RefCell<HashMap<(PathBuf, Option<std::time::SystemTime>), Preview>> = RefCell::default();
@@ -284,9 +298,12 @@ thread_local! {
 
 fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
     let file_name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let status = AUTO_FAILED
+        .with_borrow(|failed| failed.get(file).map(|e| format!("Couldn't add it: {e}")))
+        .unwrap_or_else(|| "Not added to Outpost".to_string());
     let row = adw::ActionRow::builder()
         .title(file_name.as_str())
-        .subtitle("Not added to Outpost")
+        .subtitle(status.as_str())
         .use_markup(false)
         .build();
     let icon = gtk::Image::builder()
@@ -304,7 +321,7 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
                 return;
             };
             row.set_title(name);
-            row.set_subtitle(&format!("{file_name} · Not added to Outpost"));
+            row.set_subtitle(&format!("{file_name} · {status}"));
             if let Some(texture) = texture {
                 icon.set_paintable(Some(texture));
                 icon.remove_css_class("dim-label");
@@ -350,7 +367,7 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
         add.connect_clicked(move |button| {
             button.set_sensitive(false);
             button.set_label("Adding…");
-            add_files(&store, vec![file.clone()]);
+            add_files(&store, vec![file.clone()], false);
         });
     }
     {
@@ -364,8 +381,9 @@ fn found_row(store: &Rc<Store>, file: &Path) -> adw::ActionRow {
 }
 
 /// Adds `files` to Outpost one after another in the background, then says how it
-/// went.
-fn add_files(store: &Rc<Store>, files: Vec<PathBuf>) {
+/// went. `automatic` adds (from the setting) put problems on the file's row
+/// instead of in an alert.
+fn add_files(store: &Rc<Store>, files: Vec<PathBuf>, automatic: bool) {
     // Store ids by app name, so an added app that's also in the store gets its
     // page and updates. Hand-picked and followed apps win when names clash.
     let mut listings: HashMap<String, (String, bool)> = HashMap::new();
@@ -380,20 +398,32 @@ fn add_files(store: &Rc<Store>, files: Vec<PathBuf>) {
         let paths = store.paths();
         let results = gio::spawn_blocking(move || {
             files
-                .iter()
+                .into_iter()
                 .map(|file| {
-                    install::add_existing(&paths, file, |name| {
+                    let result = install::add_existing(&paths, &file, |name| {
                         listings.get(&name.to_lowercase()).map(|(id, _)| id.clone())
-                    })
+                    });
+                    (file, result)
                 })
                 .collect::<Vec<_>>()
         })
         .await
-        .unwrap_or_else(|_| vec![Err("adding crashed".into())]);
+        .unwrap_or_default();
 
-        let (added, failed): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
-        let added: Vec<_> = added.into_iter().flatten().map(|app| app.name).collect();
-        let failed: Vec<_> = failed.into_iter().filter_map(Result::err).collect();
+        let mut added = Vec::new();
+        let mut failed = Vec::new();
+        for (file, result) in results {
+            match result {
+                Ok(app) => {
+                    AUTO_FAILED.with_borrow_mut(|problems| problems.remove(&file));
+                    added.push(app.name);
+                }
+                Err(e) if automatic => {
+                    AUTO_FAILED.with_borrow_mut(|problems| problems.insert(file, e));
+                }
+                Err(e) => failed.push(e),
+            }
+        }
         match added.as_slice() {
             [] => {}
             [one] => store.toast(&format!("{one} was added")),
