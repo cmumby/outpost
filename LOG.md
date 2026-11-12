@@ -11,7 +11,7 @@ packaged app store for AppImages, following the phases in [CLAUDE.md](CLAUDE.md)
 | 2. Index repo | Done, live at https://cmumby.github.io/outpost-index/index.json |
 | 3. Store UI | Done, committed |
 | 4. Updates | Done, committed |
-| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.6.0) |
+| 5. Ship it | Done. Releases at https://github.com/cmumby/outpost/releases (latest v0.7.0) |
 
 **Tested on this machine:** the AppImage's layout after the theme fix, the
 welcome screen, and **Move**, which put Outpost at `~/Applications/Outpost.AppImage`.
@@ -245,3 +245,16 @@ built-in TLS), `gio-unix` (needed to launch apps through their desktop entry),
   `__bold__`, `~~strike~~`, checklists and common emoji codes. Checked against
   every published note and description (`OUTPOST_NOTES_DIR=<folder> cargo test
   -- --ignored`).
+
+### v0.7.0: AppImages Outpost didn't install
+- Installed lists "Found in Your Apps Folder": AppImages sitting in the apps
+  folder that Outpost didn't install (copied in by hand, say). It looks again
+  each time the tab opens. Each shows its own name and icon, and has Add (desktop
+  entry, icon, and update checks when the catalogue knows the app), Hide, and
+  Delete (asks first; removes the file for good). Add All adds the lot.
+- A file that can't run yet shows a dim icon and a small ▶ to allow it to run,
+  without adding it to Outpost.
+- Settings → "Add AppImages found in the apps folder" (off by default) adds new
+  ones automatically. A second copy of an installed app isn't added; the row
+  says why.
+- Rows without a store page keep their buttons lined up with the rest.
